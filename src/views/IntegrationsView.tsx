@@ -12,7 +12,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { ConnectorInfo } from "../types/index.js";
-import { api } from "../lib/api.js";
+import { api, createActionContext, isCurrentContext, assertActionContext } from "../lib/api.js";
 
 interface IntegrationsViewProps {
   connectors: ConnectorInfo[];
@@ -30,25 +30,23 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
 
   const handleOpenConfig = (conn: ConnectorInfo) => {
     setSelectedConnector(conn);
-    setCredentialInput(conn.isConfigured ? "••••••••••••••••" : "");
+    setCredentialInput("");
     setPollingInterval(conn.configuredPollingIntervalMinutes);
   };
 
   const handleSaveConnector = async () => {
+    const context = createActionContext();
     if (!selectedConnector) return;
     setIsSaving(true);
     try {
       await api.updateConnector(selectedConnector.id, {
-        isConfigured: credentialInput.length > 0,
-        connectionStatus: credentialInput.length > 0 ? "Connected" : "Not Connected",
         configuredPollingIntervalMinutes: pollingInterval,
-        lastError: null,
-        lastSuccessfulCheck: new Date().toISOString(),
-      });
+      }, context);
+      assertActionContext(context);
       setSelectedConnector(null);
       onRefreshConnectors();
     } catch (err: any) {
-      alert("Failed to update connector: " + err.message);
+      if (isCurrentContext(context)) alert("Failed to update connector: " + err.message);
     } finally {
       setIsSaving(false);
     }
@@ -64,12 +62,12 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
             <span>Connector & Job Source Registry</span>
           </h2>
           <p className="text-xs text-[#737373]">
-            Verified API feeds, ATS gateways, and official developer endpoints.
+            Planned job sources. All connectors are currently not implemented.
           </p>
         </div>
 
         <div className="text-xs text-[#737373] font-mono bg-[#FAF9F8] px-3 py-1.5 rounded border border-[#E8E8E8]">
-          STRICT ANTI-BOT COMPLIANCE: ZERO FABRICATED DATA
+          NO ACTIVE CONNECTIONS
         </div>
       </div>
 
@@ -79,7 +77,7 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
         <div className="space-y-1">
           <p className="font-semibold text-[#171717]">Authentication & Authorization Standards</p>
           <p className="text-[#737373] text-[11px] leading-relaxed">
-            HireFlow strictly adheres to legitimate access policies. Aggregators without public developer APIs (such as Naukri or Workday without corporate tenant SSO) are explicitly identified as <strong>Unsupported</strong> or <strong>Not Connected</strong>. Integrations rely solely on documented APIs, authorized feeds, and permitted ATS candidate endpoints.
+            No connector performs discovery or submission. Future integrations require documented, permitted access. Credentials are not accepted in Phase 0.
           </p>
         </div>
       </div>
@@ -94,8 +92,8 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
                 <th className="py-3 px-4 font-medium">Category</th>
                 <th className="py-3 px-4 font-medium">Status</th>
                 <th className="py-3 px-4 font-medium">Capabilities</th>
-                <th className="py-3 px-4 font-medium">Last Sync</th>
-                <th className="py-3 px-4 font-medium">Polling Interval</th>
+                <th className="py-3 px-4 font-medium">Last Real Sync</th>
+                <th className="py-3 px-4 font-medium">Interval Preference</th>
                 <th className="py-3 px-4 font-medium text-right">Settings</th>
               </tr>
             </thead>
@@ -204,20 +202,21 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
 
               <div>
                 <label className="block text-[#171717] font-medium mb-1">
-                  API Key / Access Token / Feed URL
+                  Credentials unavailable in Phase 0
                 </label>
                 <input
+                  disabled
                   type="password"
                   value={credentialInput}
                   onChange={(e) => setCredentialInput(e.target.value)}
-                  placeholder="Enter authorized credential..."
+                  placeholder="Unavailable: connector not implemented"
                   className="w-full p-2 border border-[#E8E8E8] rounded-md font-mono text-xs focus:outline-none focus:border-[#171717]"
                 />
               </div>
 
               <div>
                 <label className="block text-[#171717] font-medium mb-1">
-                  Polling Interval (Minutes)
+                  Saved Interval Preference (No Scheduler)
                 </label>
                 <input
                   type="number"

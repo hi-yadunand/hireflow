@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   X,
   User,
@@ -17,7 +17,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import type { Profile, WorkExperience, Education, Project } from "../types/index.js";
-import { api } from "../lib/api.js";
+import { api, createActionContext, isCurrentContext, assertActionContext } from "../lib/api.js";
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -28,21 +28,35 @@ interface ProfileModalProps {
 
 type TabKey = "personal" | "experience" | "education" | "skills" | "projects" | "preferences" | "import";
 
-export const ProfileModal: React.FC<ProfileModalProps> = ({
+export const ProfileModal: React.FC<ProfileModalProps> = (props) => {
+  if (!props.isOpen || !props.profile) return null;
+  return <ProfileEditor key={props.profile.revision || props.profile.updatedAt} {...props} profile={props.profile} />;
+};
+
+const ProfileEditor: React.FC<ProfileModalProps & { profile: Profile }> = ({
   isOpen,
   onClose,
   profile,
   onProfileUpdated,
 }) => {
-  if (!isOpen || !profile) return null;
 
   const [activeTab, setActiveTab] = useState<TabKey>("personal");
-  const [formData, setFormData] = useState<Profile>(JSON.parse(JSON.stringify(profile)));
+  const [formData, setDraft] = useState<Profile>(JSON.parse(JSON.stringify(profile)));
+  const draftRevision = useRef(0);
+  const confirmedRevision = useRef<number | null>(null);
+  const setFormData: React.Dispatch<React.SetStateAction<Profile>> = update => {
+    draftRevision.current++;
+    confirmedRevision.current = null;
+    setConfirmed(false);
+    setDraft(previous => typeof update === "function" ? update(structuredClone(previous)) : structuredClone(update));
+  };
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
 
   // Resume Import State
   const [resumeText, setResumeText] = useState("");
+  const resumeSource = useRef("");
   const [isParsing, setIsParsing] = useState(false);
   const [parsedPreview, setParsedPreview] = useState<Partial<Profile> | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -51,14 +65,18 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [newSkill, setNewSkill] = useState("");
 
   const handleSave = async () => {
+    const context = createActionContext(), savingRevision = draftRevision.current;
+    if (!confirmed || confirmedRevision.current !== savingRevision) { alert("Review every profile field and confirm accuracy before saving."); return; }
     setIsSaving(true);
     try {
-      const updated = await api.updateProfile(formData);
+      const updated = await api.updateProfile(formData, confirmed, context);
+      assertActionContext(context);
+      if (draftRevision.current !== savingRevision) { setDraft(previous => ({ ...previous, revision: updated.revision })); return; }
       onProfileUpdated(updated);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2500);
     } catch (err: any) {
-      alert("Failed to save profile: " + err.message);
+      if (isCurrentContext(context)) alert("Failed to save profile: " + err.message);
     } finally {
       setIsSaving(false);
     }
@@ -128,12 +146,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!/\.(txt|md)$/i.test(file.name)) { setParseError("PDF and Word extraction is not implemented. Paste extracted text or upload TXT/Markdown."); return; }
     const reader = new FileReader();
+    reader.onerror = () => setParseError("Could not read the selected file.");
     reader.onload = (event) => {
       const content = event.target?.result as string;
-      setResumeText(content || "");
+      resumeSource.current = content || ""; setParsedPreview(null); setResumeText(content || "");
     };
-    // For text or markdown directly read; for PDF/DOCX read simulated extracted text
     reader.readAsText(file);
   };
 
@@ -142,17 +161,37 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       setParseError("Please paste or upload resume text to analyze.");
       return;
     }
+    const context = createActionContext(), parsingRevision = draftRevision.current, sourceText = resumeText;
     setParseError(null);
     setIsParsing(true);
     try {
-      const res = await api.uploadResume(resumeText);
+      const res = await api.uploadResume(resumeText, context);
+      assertActionContext(context);
+      if (parsingRevision !== draftRevision.current || sourceText !== resumeSource.current) throw new Error("Profile or resume text changed during extraction. Run extraction again.");
       if (res.success && res.parsed) {
         setParsedPreview(res.parsed);
       }
     } catch (err: any) {
-      setParseError(err.message || "Failed to parse resume with AI.");
+      if (isCurrentContext(context)) setParseError(err.message || "Failed to parse resume with AI.");
     } finally {
       setIsParsing(false);
+    }
+  };
+
+  const handleLoadLegacy = async () => {
+    const context = createActionContext(), importingRevision = draftRevision.current;
+    try {
+      const legacy = await api.getLegacyProfile(context);
+      assertActionContext(context);
+      if (importingRevision !== draftRevision.current) throw new Error("Profile changed while loading legacy data. Review the current draft before importing again.");
+      if (legacy.profile.isDemo) {
+        alert("This preserved profile is demonstration data. Use Demo preview to inspect it; enter your own real profile here.");
+        return;
+      }
+      setFormData({ ...legacy.profile, revision: formData.revision, isDemo: false, reviewedAt: undefined });
+      alert(legacy.warning);
+    } catch (error) {
+      if (isCurrentContext(context)) alert(error instanceof Error ? error.message : "Could not load legacy profile");
     }
   };
 
@@ -160,15 +199,15 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     if (!parsedPreview) return;
     setFormData((prev) => ({
       ...prev,
-      personal: {
-        ...prev.personal,
-        ...(parsedPreview.personal || {}),
-      },
-      skills: parsedPreview.skills?.length ? Array.from(new Set([...prev.skills, ...parsedPreview.skills])) : prev.skills,
-      experience: parsedPreview.experience?.length ? (parsedPreview.experience as WorkExperience[]) : prev.experience,
-      education: parsedPreview.education?.length ? (parsedPreview.education as Education[]) : prev.education,
-      languages: parsedPreview.languages?.length ? parsedPreview.languages : prev.languages,
+      personal: parsedPreview.personal || prev.personal,
+      skills: parsedPreview.skills || [],
+      experience: parsedPreview.experience || [],
+      education: parsedPreview.education || [],
+      languages: parsedPreview.languages || [],
+      // Project/certification edits remain intact; only extracted sections are replaced.
+      reviewedAt: undefined,
     }));
+    setConfirmed(false);
     setParsedPreview(null);
     setResumeText("");
     setActiveTab("personal");
@@ -188,7 +227,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 Master Professional Profile
               </h2>
               <p className="text-xs text-[#737373]">
-                Verified source-of-truth used by the Gemini career agent for autonomous tailoring.
+                Review your profile for accuracy before using Gemini draft generation.
               </p>
             </div>
           </div>
@@ -383,7 +422,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <p className="text-xs text-[#737373]">
-                  All positions and verified accomplishments used for AI resume tailoring.
+                  Review all positions and accomplishments before generating AI drafts.
                 </p>
                 <div className="flex items-center space-x-2">
                   <button
@@ -561,7 +600,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                         value={`${edu.startDate || ""} - ${edu.endDate || ""}`}
                         onChange={(e) => {
                           const next = [...formData.education];
-                          const parts = e.target.value.split("-");
+                          const parts = e.target.value.split(/\s+[–—-]\s+/);
                           next[idx].startDate = parts[0]?.trim() || "";
                           next[idx].endDate = parts[1]?.trim() || "";
                           setFormData({ ...formData, education: next });
@@ -633,9 +672,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                     onClick={() => {
                       const newCert = {
                         id: `cert-${Date.now()}`,
-                        name: "AWS Certified Developer",
-                        issuer: "Amazon Web Services",
-                        issueDate: "2024",
+                        name: "",
+                        issuer: "",
+                        issueDate: "",
                       };
                       setFormData({ ...formData, certifications: [...formData.certifications, newCert] });
                     }}
@@ -647,8 +686,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 {formData.certifications.map((c, i) => (
                   <div key={c.id} className="p-3 border border-[#E8E8E8] rounded-md bg-[#FAF9F8] flex items-center justify-between mb-2">
                     <div className="text-xs">
-                      <p className="font-medium text-[#171717]">{c.name}</p>
-                      <p className="text-[#737373] font-mono text-[11px]">{c.issuer} • {c.issueDate}</p>
+                      {(["name", "issuer", "issueDate", "credentialUrl"] as const).map(field => <input key={field} aria-label={`Certification ${field}`} placeholder={field} value={c[field] || ""} onChange={e => setFormData(previous => ({ ...previous, certifications: previous.certifications.map((cert, index) => index === i ? { ...cert, [field]: e.target.value } : cert) }))} className="text-xs px-2 py-1 border border-[#E8E8E8] rounded-md" />)}
                     </div>
                     <button
                       onClick={() =>
@@ -849,6 +887,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                       }
                       className="w-full text-xs px-3 py-2 border border-[#E8E8E8] rounded-md focus:outline-none focus:border-[#171717]"
                     >
+                      <option value="Not provided">Not provided</option>
                       <option value="Citizen">Citizen</option>
                       <option value="Permanent Resident">Permanent Resident (Green Card)</option>
                       <option value="Work Visa">Work Visa (H1B / TN / O1)</option>
@@ -889,16 +928,16 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   <span>Gemini-Powered Resume Parser</span>
                 </h4>
                 <p className="text-xs text-[#737373] mb-3">
-                  Upload your existing PDF / DOCX resume or paste raw text. Gemini will extract personal details, work history, skills, and education into your master profile for review.
+                  Upload TXT / Markdown or paste extracted resume text. PDF / DOCX extraction is not implemented. Gemini will extract personal details, work history, skills, and education into your master profile for review.
                 </p>
 
                 <div className="flex items-center space-x-3 mb-3">
                   <label className="flex items-center space-x-2 text-xs font-medium bg-white border border-[#E8E8E8] px-3 py-2 rounded-md hover:bg-[#F8F8F7] cursor-pointer transition-colors">
                     <FileText className="w-4 h-4 text-[#737373]" />
-                    <span>Upload Resume (PDF, DOCX, TXT)</span>
+                    <span>Upload Resume Text (TXT, MD)</span>
                     <input
                       type="file"
-                      accept=".pdf,.docx,.doc,.txt"
+                      accept=".txt,.md"
                       onChange={handleFileUpload}
                       className="hidden"
                     />
@@ -909,7 +948,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 <textarea
                   rows={6}
                   value={resumeText}
-                  onChange={(e) => setResumeText(e.target.value)}
+                  onChange={(e) => { resumeSource.current = e.target.value; setParsedPreview(null); setResumeText(e.target.value); }}
                   placeholder="Paste resume text here (Experience, Education, Skills, Projects)..."
                   className="w-full text-xs p-3 font-mono bg-white border border-[#E8E8E8] rounded-md focus:outline-none focus:border-[#171717]"
                 />
@@ -924,7 +963,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 <div className="mt-3 flex justify-end">
                   <button
                     onClick={handleTriggerAIParsing}
-                    disabled={isParsing || !resumeText.trim()}
+                    disabled={isParsing || !resumeText.trim() || profile.isDemo}
                     className={`flex items-center space-x-1.5 text-xs font-medium px-4 py-2 rounded-md transition-colors ${
                       isParsing || !resumeText.trim()
                         ? "bg-gray-100 text-gray-400 cursor-not-allowed"
@@ -943,13 +982,13 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   <div className="flex items-center justify-between">
                     <h5 className="text-xs font-semibold text-emerald-900 flex items-center space-x-1.5">
                       <Check className="w-4 h-4 text-emerald-600" />
-                      <span>Extraction Complete — Review Extracted Fields</span>
+                      <span>Review extraction — accepting replaces personal details, skills, experience, education and languages</span>
                     </h5>
                     <button
                       onClick={handleApplyParsedResume}
                       className="text-xs font-medium bg-emerald-600 text-white px-3 py-1.5 rounded-md hover:bg-emerald-700 transition-colors shadow-xs"
                     >
-                      Accept & Merge into Profile
+                      Replace Imported Sections
                     </button>
                   </div>
 
@@ -976,6 +1015,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
         {/* Footer Actions */}
         <div className="px-6 py-3.5 border-t border-[#E8E8E8] flex items-center justify-between bg-[#FAF9F8]">
           <div className="text-xs text-[#737373]">
+            <label className="flex items-center gap-2"><input type="checkbox" checked={confirmed} onChange={e => { confirmedRevision.current = e.target.checked ? draftRevision.current : null; setConfirmed(e.target.checked); }} />I reviewed all fields and confirm their accuracy</label>
+            {profile.legacyProfileAvailable && <button type="button" className="underline" onClick={handleLoadLegacy}>Review preserved legacy profile (unverified)</button>}
             {saveSuccess ? (
               <span className="text-emerald-600 font-medium flex items-center space-x-1">
                 <Check className="w-3.5 h-3.5" />
@@ -994,7 +1035,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </button>
             <button
               onClick={handleSave}
-              disabled={isSaving}
+              disabled={isSaving || profile.isDemo}
               className="text-xs font-medium bg-[#171717] text-white px-4 py-1.5 rounded-md hover:bg-black transition-colors shadow-xs flex items-center space-x-1.5"
             >
               {isSaving && <Sparkles className="w-3 h-3 animate-spin" />}

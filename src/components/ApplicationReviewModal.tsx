@@ -19,7 +19,7 @@ import type {
   TailoredCoverLetter,
   ApplicationStatus,
 } from "../types/index.js";
-import { api } from "../lib/api.js";
+import { api, createActionContext, isCurrentContext, assertActionContext } from "../lib/api.js";
 
 interface ApplicationReviewModalProps {
   isOpen: boolean;
@@ -31,7 +31,12 @@ interface ApplicationReviewModalProps {
   onStatusChanged: (updated: ApplicationRecord) => void;
 }
 
-export const ApplicationReviewModal: React.FC<ApplicationReviewModalProps> = ({
+export const ApplicationReviewModal: React.FC<ApplicationReviewModalProps> = (props) => {
+  if (!props.isOpen || !props.application) return null;
+  return <ApplicationEditor key={props.application.id} {...props} application={props.application} />;
+};
+
+const ApplicationEditor: React.FC<ApplicationReviewModalProps & { application: ApplicationRecord }> = ({
   isOpen,
   onClose,
   application,
@@ -40,33 +45,31 @@ export const ApplicationReviewModal: React.FC<ApplicationReviewModalProps> = ({
   coverLetter,
   onStatusChanged,
 }) => {
-  if (!isOpen || !application) return null;
 
   const [activeTab, setActiveTab] = useState<"overview" | "resume" | "cover_letter" | "answers" | "timeline">("overview");
-  const [editedAnswers, setEditedAnswers] = useState(application.applicationAnswers || []);
+  const [editedAnswers, setEditedAnswers] = useState(() => structuredClone(application.applicationAnswers || []));
   const [reviewNotes, setReviewNotes] = useState(application.reviewNotes || "");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleUpdateStatus = async (newStatus: ApplicationStatus, message?: string) => {
+    const context = createActionContext();
     setIsSubmitting(true);
     try {
-      const updated = await api.updateApplication(application.id, {
-        status: newStatus,
-        statusMessage: message || `Status updated to ${newStatus} by candidate`,
-        reviewNotes,
-        applicationAnswers: editedAnswers,
-        appliedAt: newStatus === "Applied" ? new Date().toISOString() : application.appliedAt,
-      });
-
-      // Also update job applicationStatus
-      if (job) {
-        await api.updateJob(job.id, { applicationStatus: newStatus });
+      const edits = { reviewNotes, applicationAnswers: editedAnswers };
+      const preview = application.id.startsWith("app-preview-");
+      let updated: ApplicationRecord;
+      if (preview && ["Rejected", "Interview", "Submission Unverified"].includes(newStatus)) {
+        updated = await api.recordManualApplication({ jobId: application.jobId, status: newStatus as "Rejected" | "Interview" | "Submission Unverified", ...edits }, context);
+      } else {
+        const stored = preview ? await api.createApplication({ jobId: application.jobId }, context) : application;
+        assertActionContext(context);
+        updated = await api.updateApplication(stored.id, { status: newStatus, ...edits }, context);
       }
-
+      assertActionContext(context);
       onStatusChanged(updated);
       onClose();
     } catch (err: any) {
-      alert("Failed to update application status: " + err.message);
+      if (isCurrentContext(context)) alert("Failed to update application status: " + err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -94,7 +97,7 @@ export const ApplicationReviewModal: React.FC<ApplicationReviewModalProps> = ({
                 <span>Match: {application.matchPercentage}%</span>
                 <span>•</span>
                 <span className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-800 border border-amber-200">
-                  {application.status}
+                  {application.status} • {application.isDemo ? "DEMO" : "UNVERIFIED"}
                 </span>
               </div>
             </div>
@@ -167,7 +170,7 @@ export const ApplicationReviewModal: React.FC<ApplicationReviewModalProps> = ({
 
               <div className="p-4 border border-[#E8E8E8] rounded-lg space-y-3">
                 <label className="block text-xs font-semibold text-[#171717]">
-                  Candidate Review Notes & Custom Submission Flags
+                  Candidate Review Notes
                 </label>
                 <textarea
                   rows={3}
@@ -181,9 +184,9 @@ export const ApplicationReviewModal: React.FC<ApplicationReviewModalProps> = ({
               <div className="p-4 border border-blue-100 bg-blue-50/30 rounded-lg flex items-start space-x-3 text-xs text-blue-900">
                 <ShieldCheck className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className="font-medium">Strict Verification Guarantee</p>
+                  <p className="font-medium">Submission evidence</p>
                   <p className="text-blue-800/80 text-[11px] mt-0.5">
-                    HireFlow does not simulate fake submissions. All tailored documents are compiled from your verified profile data without hallucinated claims.
+                    No application is submitted by HireFlow. Drafts require your review. Historical and user-reported statuses are unverified.
                   </p>
                 </div>
               </div>
@@ -261,20 +264,19 @@ export const ApplicationReviewModal: React.FC<ApplicationReviewModalProps> = ({
           {activeTab === "answers" && (
             <div className="space-y-3">
               <p className="text-xs text-[#737373]">
-                Standard application portal answers extracted and prepared by the agent. Review and adjust before dispatch.
+                Suggested answers prepared locally. Review and confirm each answer; no portal was accessed.
               </p>
               {editedAnswers.map((ans, idx) => (
                 <div key={idx} className="p-3.5 border border-[#E8E8E8] rounded-lg bg-[#FAF9F8] space-y-2">
                   <label className="block text-xs font-semibold text-[#171717]">
                     Q: {ans.question}
                   </label>
+                  <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={ans.confirmed} onChange={e => setEditedAnswers(previous => previous.map((answer, i) => i === idx ? { ...answer, confirmed: e.target.checked } : answer))} />I reviewed this answer</label>
                   <textarea
                     rows={2}
                     value={ans.suggestedAnswer}
                     onChange={(e) => {
-                      const next = [...editedAnswers];
-                      next[idx].suggestedAnswer = e.target.value;
-                      setEditedAnswers(next);
+                      setEditedAnswers(previous => previous.map((answer, i) => i === idx ? { ...answer, suggestedAnswer: e.target.value, confirmed: false } : answer));
                     }}
                     className="w-full text-xs p-2 bg-white border border-[#E8E8E8] rounded-md focus:outline-none focus:border-[#171717]"
                   />
@@ -286,7 +288,7 @@ export const ApplicationReviewModal: React.FC<ApplicationReviewModalProps> = ({
           {/* TAB 5: TIMELINE */}
           {activeTab === "timeline" && (
             <div className="space-y-3">
-              <h5 className="text-xs font-semibold text-[#171717] mb-2">Audit Log & State Transitions</h5>
+              <h5 className="text-xs font-semibold text-[#171717] mb-2">Recorded History (Unverified)</h5>
               <div className="space-y-2">
                 {application.timeline.map((item, idx) => (
                   <div key={idx} className="flex items-start space-x-3 text-xs border-l-2 border-[#171717] pl-3 py-1">
@@ -316,28 +318,28 @@ export const ApplicationReviewModal: React.FC<ApplicationReviewModalProps> = ({
             {application.status === "Awaiting Approval" && (
               <button
                 onClick={() => handleUpdateStatus("Ready to Apply", "Approved by candidate for dispatch")}
-                disabled={isSubmitting}
+                disabled={isSubmitting || application.isDemo}
                 className="text-xs font-medium bg-emerald-600 text-white px-3 py-1.5 rounded-md hover:bg-emerald-700 transition-colors flex items-center space-x-1"
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Approve Submission</span>
+                <span>Approve Local Package</span>
               </button>
             )}
 
             {application.status === "Ready to Apply" && (
               <button
-                onClick={() => handleUpdateStatus("Applied", "Application submission dispatched through ATS portal")}
-                disabled={isSubmitting}
+                onClick={() => handleUpdateStatus("Submission Unverified")}
+                disabled={isSubmitting || application.isDemo}
                 className="text-xs font-medium bg-[#171717] text-white px-3 py-1.5 rounded-md hover:bg-black transition-colors flex items-center space-x-1"
               >
                 <Send className="w-3.5 h-3.5" />
-                <span>Mark as Applied</span>
+                <span>Record Manual Application (Unverified)</span>
               </button>
             )}
 
             <button
               onClick={() => handleUpdateStatus("Interview", "Moved to interview stage")}
-              disabled={isSubmitting}
+              disabled={isSubmitting || application.isDemo}
               className="text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1.5 rounded-md hover:bg-blue-100 transition-colors"
             >
               Moved to Interview
@@ -345,7 +347,7 @@ export const ApplicationReviewModal: React.FC<ApplicationReviewModalProps> = ({
 
             <button
               onClick={() => handleUpdateStatus("Rejected", "Application marked as rejected")}
-              disabled={isSubmitting}
+              disabled={isSubmitting || application.isDemo}
               className="text-xs font-medium text-red-600 hover:bg-red-50 px-2.5 py-1.5 rounded-md transition-colors"
             >
               Mark Rejected

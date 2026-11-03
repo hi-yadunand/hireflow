@@ -10,7 +10,7 @@ import {
   Edit3,
 } from "lucide-react";
 import type { TailoredCoverLetter, Job } from "../types/index.js";
-import { api } from "../lib/api.js";
+import { api, createActionContext, isCurrentContext, assertActionContext } from "../lib/api.js";
 
 interface CoverLettersViewProps {
   coverLetters: TailoredCoverLetter[];
@@ -32,25 +32,29 @@ export const CoverLettersView: React.FC<CoverLettersViewProps> = ({
   const selectedLetter = coverLetters.find((l) => l.id === selectedLetterId) || coverLetters[0];
 
   const handleGenerate = async () => {
+    const context = createActionContext();
     if (!targetJobId) return;
     setIsGenerating(true);
     try {
-      const res = await api.generateCoverLetterForJob(targetJobId, selectedTone);
+      const res = await api.generateCoverLetterForJob(targetJobId, selectedTone, context);
+      assertActionContext(context);
       if (res.success && res.coverLetter) {
         setSelectedLetterId(res.coverLetter.id);
       }
       onRefreshCoverLetters();
     } catch (err: any) {
-      alert("Failed to generate cover letter: " + err.message);
+      if (isCurrentContext(context)) alert("Failed to generate cover letter: " + err.message);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) { alert(error instanceof Error ? error.message : "Could not copy text"); }
   };
 
   return (
@@ -62,7 +66,7 @@ export const CoverLettersView: React.FC<CoverLettersViewProps> = ({
             Cover Letters Management
           </h2>
           <p className="text-xs text-[#737373]">
-            Targeted, high-converting letters synthesized from your real achievements and specific company value propositions.
+            AI draft letters for saved jobs. Review all candidate and company claims before use.
           </p>
         </div>
 

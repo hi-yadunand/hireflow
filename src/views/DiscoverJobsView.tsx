@@ -18,7 +18,7 @@ import {
   CheckCircle,
 } from "lucide-react";
 import type { Job, JobSource } from "../types/index.js";
-import { api } from "../lib/api.js";
+import { api, createActionContext, isCurrentContext, assertActionContext } from "../lib/api.js";
 
 interface DiscoverJobsViewProps {
   jobs: Job[];
@@ -48,10 +48,10 @@ export const DiscoverJobsView: React.FC<DiscoverJobsViewProps> = ({
     company: "",
     position: "",
     location: "Remote",
-    country: "United States",
+    country: "",
     employmentType: "Full-time" as const,
     workplaceType: "Remote" as const,
-    salary: "$180,000 – $220,000 USD",
+    salary: "",
     experienceLevel: "Senior" as const,
     source: "Direct Career Page" as JobSource,
     applyUrl: "",
@@ -101,12 +101,14 @@ export const DiscoverJobsView: React.FC<DiscoverJobsViewProps> = ({
 
   const handleRunAiAnalysis = async (e: React.MouseEvent, job: Job) => {
     e.stopPropagation();
+    const context = createActionContext();
     setAnalyzingJobId(job.id);
     try {
-      await api.analyzeJob(job.id);
+      await api.analyzeJob(job.id, context);
+      assertActionContext(context);
       onRefreshJobs();
     } catch (err: any) {
-      alert("Analysis failed: " + err.message);
+      if (isCurrentContext(context)) alert("Analysis failed: " + err.message);
     } finally {
       setAnalyzingJobId(null);
     }
@@ -114,16 +116,18 @@ export const DiscoverJobsView: React.FC<DiscoverJobsViewProps> = ({
 
   const handleCreateCustomJob = async (e: React.FormEvent) => {
     e.preventDefault();
+    const context = createActionContext();
     try {
       await api.createJob({
         ...newJobData,
         requirements: newJobData.requirements.split("\n").map((r) => r.trim()).filter(Boolean),
         niceToHave: [],
-      });
+      }, context);
+      assertActionContext(context);
       setShowAddJobModal(false);
       onRefreshJobs();
     } catch (err: any) {
-      alert("Failed to track job: " + err.message);
+      if (isCurrentContext(context)) alert("Failed to track job: " + err.message);
     }
   };
 
@@ -136,7 +140,7 @@ export const DiscoverJobsView: React.FC<DiscoverJobsViewProps> = ({
             Discovered Opportunities
           </h2>
           <p className="text-xs text-[#737373]">
-            Indexed directly from company ATS platforms, developer communities, and job boards.
+            Manually saved listings. No job sources are connected. Sample records are labeled.
           </p>
         </div>
 
@@ -246,7 +250,7 @@ export const DiscoverJobsView: React.FC<DiscoverJobsViewProps> = ({
       <div className="space-y-3">
         <div className="text-xs text-[#737373] font-mono px-1 flex justify-between">
           <span>SHOWING {filteredJobs.length} QUALIFIED ROLES</span>
-          <span>AUTONOMOUS PIPELINE ENABLED</span>
+          <span>MANUAL PROCESSING ONLY</span>
         </div>
 
         {filteredJobs.length === 0 ? (
@@ -456,7 +460,7 @@ export const DiscoverJobsView: React.FC<DiscoverJobsViewProps> = ({
                   type="submit"
                   className="px-4 py-1.5 bg-[#171717] text-white rounded-md hover:bg-black font-medium"
                 >
-                  Track & Analyze
+                  Track Job
                 </button>
               </div>
             </form>

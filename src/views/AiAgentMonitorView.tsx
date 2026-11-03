@@ -52,7 +52,7 @@ export const AiAgentMonitorView: React.FC<AiAgentMonitorViewProps> = ({
             <span>AI Agent Monitor & Telemetry</span>
           </h2>
           <p className="text-xs text-[#737373]">
-            Real-time backend worker execution trace, source polling checks, and audit trail.
+            Manual processing state and recorded logs. No cloud worker or source polling is implemented.
           </p>
         </div>
 
@@ -92,11 +92,11 @@ export const AiAgentMonitorView: React.FC<AiAgentMonitorViewProps> = ({
             />
             <span>{isPaused ? "Paused" : status?.workerState.replace("_", " ")}</span>
           </div>
-          <div className="text-[10px] text-[#737373] font-mono mt-1">Autonomous supervisor</div>
+          <div className="text-[10px] text-[#737373] font-mono mt-1">Manual process only</div>
         </div>
 
         <div className="p-4 rounded-xl border border-[#E8E8E8] bg-white">
-          <div className="text-[11px] text-[#737373] font-medium">Daily Application Dispatch</div>
+          <div className="text-[11px] text-[#737373] font-medium">Daily Packages Staged</div>
           <div className="text-lg font-bold font-mono text-[#171717] mt-1">
             {status?.dailyApplicationsCount} / {status?.dailyApplicationLimit}
           </div>
@@ -104,7 +104,7 @@ export const AiAgentMonitorView: React.FC<AiAgentMonitorViewProps> = ({
         </div>
 
         <div className="p-4 rounded-xl border border-[#E8E8E8] bg-white">
-          <div className="text-[11px] text-[#737373] font-medium">Configured Connectors</div>
+          <div className="text-[11px] text-[#737373] font-medium">Operational Connectors</div>
           <div className="text-lg font-bold font-mono text-[#171717] mt-1">
             {status?.activeConnectorsCount} Connected
           </div>
@@ -112,29 +112,29 @@ export const AiAgentMonitorView: React.FC<AiAgentMonitorViewProps> = ({
         </div>
 
         <div className="p-4 rounded-xl border border-[#E8E8E8] bg-white">
-          <div className="text-[11px] text-[#737373] font-medium">Next Polling Cycle</div>
+          <div className="text-[11px] text-[#737373] font-medium">Next Scheduled Cycle</div>
           <div className="text-lg font-bold font-mono text-[#171717] mt-1">
             {status?.nextScheduledRun
               ? new Date(status.nextScheduledRun).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-              : "In 15m"}
+              : "Not scheduled"}
           </div>
-          <div className="text-[10px] text-[#737373] font-mono mt-1">Scheduled background tick</div>
+          <div className="text-[10px] text-[#737373] font-mono mt-1">No scheduler implemented</div>
         </div>
       </div>
 
       {/* Execution Task Pipelines */}
       <div className="p-5 rounded-xl border border-[#E8E8E8] bg-white space-y-3">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-[#171717]">
-          Autonomous Pipeline Stages
+          Processing Stages
         </h3>
         <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2 text-xs">
           {[
-            { name: "Source Checks", active: status?.workerState === "running_discovery", count: "14 Feeds" },
+            { name: "Source Checks", active: false, count: "Not implemented" },
             { name: "New Discoveries", active: false, count: `${status?.totalJobsDiscoveredToday || 0} Today` },
-            { name: "Semantic Matching", active: status?.workerState === "matching", count: "Gemini 3.8" },
-            { name: "Resume Tailoring", active: status?.workerState === "generating_docs", count: "Verified Only" },
+            { name: "Semantic Matching", active: status?.workerState === "matching", count: settings?.geminiModel || "Not configured" },
+            { name: "Resume Tailoring", active: status?.workerState === "generating_docs", count: "Review required" },
             { name: "Cover Letter Synth", active: status?.workerState === "generating_docs", count: "Custom Hooks" },
-            { name: "Portal Preparation", active: false, count: "Q&A Mapping" },
+            { name: "Portal Preparation", active: false, count: "Draft answers" },
             { name: "Submission Staging", active: false, count: settings?.applicationMode?.toUpperCase() || "HYBRID" },
           ].map((task, i) => (
             <div
@@ -165,7 +165,7 @@ export const AiAgentMonitorView: React.FC<AiAgentMonitorViewProps> = ({
           <div className="flex items-center space-x-2">
             <Terminal className="w-4 h-4 text-[#171717]" />
             <h3 className="text-sm font-semibold text-[#171717]">
-              Real-time Execution Log ({filteredLogs.length})
+              Recorded Processing Log ({filteredLogs.length})
             </h3>
           </div>
 
@@ -232,7 +232,7 @@ export const AiAgentMonitorView: React.FC<AiAgentMonitorViewProps> = ({
                     log.severity === "error" ? "text-red-700 font-medium" : "text-[#171717]"
                   }`}
                 >
-                  {log.message}
+                  {log.isDemo ? "[DEMO] " : log.legacyUnverified ? "[Legacy, unverified] " : ""}{log.message}
                 </span>
               </div>
             ))

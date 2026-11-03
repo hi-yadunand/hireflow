@@ -66,7 +66,7 @@ export const ApplicationsView: React.FC<ApplicationsViewProps> = ({
             Application Command Centre
           </h2>
           <p className="text-xs text-[#737373]">
-            Track all active opportunities across the complete 11-stage autonomous application lifecycle.
+            Track local application packages and user-reported outcomes. Submission is not implemented.
           </p>
         </div>
 
@@ -160,7 +160,7 @@ export const ApplicationsView: React.FC<ApplicationsViewProps> = ({
                         }`}
                       >
                         <td className="py-3.5 px-4">
-                          <div className="font-semibold text-[#171717]">{app.position}</div>
+                          <div className="font-semibold text-[#171717]">{app.position} <span className="text-[10px] text-[#737373] font-mono">{app.isDemo ? "DEMO" : "UNVERIFIED"}</span></div>
                           <div className="text-[11px] text-[#737373] flex items-center space-x-1.5 mt-0.5">
                             <span className="font-medium text-[#171717]">{app.company}</span>
                             <span>•</span>
@@ -213,7 +213,7 @@ export const ApplicationsView: React.FC<ApplicationsViewProps> = ({
                             className="inline-flex items-center space-x-1 text-[11px] font-medium text-[#171717] bg-[#F8F8F7] hover:bg-[#EFEFEF] border border-[#E8E8E8] px-2.5 py-1 rounded transition-colors"
                           >
                             <Eye className="w-3 h-3 text-[#737373]" />
-                            <span>Inspect & Approve</span>
+                            <span>Inspect & Review</span>
                           </button>
                         </td>
                       </tr>
@@ -231,8 +231,8 @@ export const ApplicationsView: React.FC<ApplicationsViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {[
             { title: "Review & Approval", filterStatus: ["Documents Generated", "Awaiting Approval"] },
-            { title: "Ready for Dispatch", filterStatus: ["Ready to Apply", "Applying"] },
-            { title: "Dispatched (Applied)", filterStatus: ["Applied", "Submission Unverified"] },
+            { title: "Ready for Manual Application", filterStatus: ["Ready to Apply", "Applying"] },
+            { title: "Reported / Unverified", filterStatus: ["Applied", "Submission Unverified"] },
             { title: "Interviews & Offers", filterStatus: ["Interview"] },
           ].map((col, idx) => {
             const colApps = applications.filter((a) => col.filterStatus.includes(a.status));

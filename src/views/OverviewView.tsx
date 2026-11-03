@@ -58,9 +58,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     return diff < 1000 * 60 * 60 * 24;
   }).length;
 
-  const threshold = settings?.matchThreshold || 75;
+  const threshold = settings?.matchThreshold ?? 75;
   const matchingJobs = jobs.filter((j) => (j.matchPercentage || 0) >= threshold);
-  const applicationsSubmitted = applications.filter((a) => a.status === "Applied" || a.status === "Interview").length;
+  const applicationsReported = applications.filter((a) => ["Applied", "Submission Unverified", "Interview"].includes(a.status)).length;
   const awaitingApproval = applications.filter((a) => a.status === "Awaiting Approval").length;
   const scheduledInterviews = interviews.filter((i) => i.status === "Scheduled").length;
 
@@ -71,7 +71,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
     docsGenerated: jobs.filter((j) => j.applicationStatus === "Documents Generated").length,
     awaitingApproval,
     readyToApply: applications.filter((a) => a.status === "Ready to Apply").length,
-    applied: applicationsSubmitted,
+    applied: applicationsReported,
     interview: interviews.length,
   };
 
@@ -83,14 +83,14 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
           <div className="flex items-center space-x-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500" />
             <h2 className="text-base font-semibold text-[#171717] tracking-tight">
-              AI Career Autonomous Engine
+              AI Career Workspace
             </h2>
             <span className="text-xs text-[#737373] font-mono">
               Mode: {settings?.applicationMode?.toUpperCase() || "HYBRID"}
             </span>
           </div>
           <p className="text-xs text-[#737373] max-w-2xl">
-            Continuously polling configured ATS connectors and developer feeds worldwide, filtering by your verified credentials, and synthesizing customized applications.
+            Manually process saved jobs and review AI drafts. Job discovery, automatic submission and background scheduling are not implemented.
           </p>
         </div>
 
@@ -101,7 +101,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             className="text-xs font-medium bg-[#171717] text-white px-3.5 py-2 rounded-md hover:bg-black transition-all flex items-center space-x-1.5 shadow-xs"
           >
             <Activity className={`w-3.5 h-3.5 ${isCycleLoading ? "animate-spin" : ""}`} />
-            <span>{isCycleLoading ? "Executing Cycle..." : "Run Autonomous Cycle"}</span>
+            <span>{isCycleLoading ? "Executing Cycle..." : "Process Stored Jobs"}</span>
           </button>
         </div>
       </div>
@@ -109,10 +109,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
       {/* Metric Cards (Required: Total discovered, New jobs today, Matching jobs, Applications submitted, Awaiting approval, Interviews) */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
-          { label: "Jobs Discovered", value: totalDiscovered, sub: "Total indexed", icon: Compass, tab: "discover" as NavItemKey },
+          { label: "Stored Jobs", value: totalDiscovered, sub: "Manually recorded", icon: Compass, tab: "discover" as NavItemKey },
           { label: "New Today", value: newToday, sub: "Last 24 hours", icon: Clock, tab: "discover" as NavItemKey },
           { label: "AI Matches", value: matchingJobs.length, sub: `>= ${threshold}% fit score`, icon: Sparkles, tab: "matches" as NavItemKey },
-          { label: "Submitted", value: applicationsSubmitted, sub: "Dispatched", icon: Briefcase, tab: "applications" as NavItemKey },
+          { label: "Reported Applications", value: applicationsReported, sub: "User-reported; unverified", icon: Briefcase, tab: "applications" as NavItemKey },
           { label: "Awaiting Approval", value: awaitingApproval, sub: "Needs review", highlight: awaitingApproval > 0, icon: CheckCircle2, tab: "applications" as NavItemKey },
           { label: "Interviews", value: scheduledInterviews, sub: "Scheduled", highlight: scheduledInterviews > 0, icon: Calendar, tab: "interviews" as NavItemKey },
         ].map((card, i) => {
@@ -147,9 +147,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-[#171717] tracking-tight">
-                  Autonomous Application Pipeline
+                  Application Pipeline
                 </h3>
-                <p className="text-xs text-[#737373]">Live stage distribution across all tracked opportunities</p>
+                <p className="text-xs text-[#737373]">Stage distribution from stored application records</p>
               </div>
               <button
                 onClick={() => onNavigate("applications")}
@@ -168,7 +168,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                 { label: "Docs Ready", count: pipelineCounts.docsGenerated },
                 { label: "Awaiting Review", count: pipelineCounts.awaitingApproval, urgent: pipelineCounts.awaitingApproval > 0 },
                 { label: "Ready to Apply", count: pipelineCounts.readyToApply },
-                { label: "Submitted", count: pipelineCounts.applied },
+                { label: "Reported Applications", count: pipelineCounts.applied },
                 { label: "Interviews", count: pipelineCounts.interview },
               ].map((step, idx) => (
                 <div
@@ -193,7 +193,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                 <h3 className="text-sm font-semibold text-[#171717] tracking-tight">
                   High-Compatibility Discoveries
                 </h3>
-                <p className="text-xs text-[#737373]">Ranked by Gemini semantic evaluation score</p>
+                <p className="text-xs text-[#737373]">Saved opportunities; scores may be unverified legacy data</p>
               </div>
               <button
                 onClick={() => onNavigate("matches")}
@@ -205,7 +205,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
             </div>
 
             <div className="divide-y divide-[#E8E8E8]">
-              {jobs.slice(0, 4).map((job) => (
+              {[...jobs].sort((a, b) => b.matchPercentage - a.matchPercentage).slice(0, 4).map((job) => (
                 <div
                   key={job.id}
                   onClick={() => onSelectJob(job)}
@@ -273,14 +273,14 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               </div>
 
               <div className="flex items-center justify-between p-2.5 rounded-lg bg-[#FAF9F8] border border-[#E8E8E8]">
-                <span className="text-[#737373]">Daily Cap Allocation</span>
+                <span className="text-[#737373]">Daily Staging Allocation</span>
                 <span className="font-mono font-medium text-[#171717]">
-                  {status?.dailyApplicationsCount} / {status?.dailyApplicationLimit} dispatched
+                  {status?.dailyApplicationsCount} / {status?.dailyApplicationLimit} staged
                 </span>
               </div>
 
               <div className="flex items-center justify-between p-2.5 rounded-lg bg-[#FAF9F8] border border-[#E8E8E8]">
-                <span className="text-[#737373]">Last Polling Sync</span>
+                <span className="text-[#737373]">Last Manual Cycle</span>
                 <span className="font-mono text-[#737373] text-[11px]">
                   {status?.lastCycleRun ? new Date(status.lastCycleRun).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "N/A"}
                 </span>
@@ -304,7 +304,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
               <h3 className="text-sm font-semibold text-[#171717] tracking-tight">
                 Recent AI Activity
               </h3>
-              <span className="text-[10px] font-mono text-[#737373]">LIVE AUDIT</span>
+              <span className="text-[10px] font-mono text-[#737373]">RECORDED ACTIVITY</span>
             </div>
 
             <div className="space-y-3">
@@ -315,7 +315,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({
                     <span>{new Date(log.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
                   </div>
                   <p className="text-[#171717] text-xs leading-relaxed">
-                    {log.message}
+                    {log.legacyUnverified && "[Legacy, unverified] "}{log.message}
                   </p>
                 </div>
               ))}

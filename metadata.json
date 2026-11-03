@@ -1,6 +1,8 @@
 {
   "name": "HireFlow",
-  "description": "Your next opportunity. On autopilot. AI career agent for autonomous job discovery, matching, tailored documents, and application monitoring.",
+  "description": "Career workspace for manually tracked jobs, reviewed profiles, AI draft documents and application history. Discovery, submission and scheduling are not implemented.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

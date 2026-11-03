@@ -1,3 +1,8 @@
+export interface RecordOrigin {
+  isDemo?: boolean;
+  legacyUnverified?: boolean;
+}
+
 export interface PersonalDetails {
   fullName: string;
   email: string;
@@ -26,7 +31,7 @@ export interface WorkExperience {
   company: string;
   role: string;
   location: string;
-  type: 'Full-time' | 'Contract' | 'Part-time' | 'Internship';
+  type: 'Full-time' | 'Contract' | 'Part-time' | 'Internship' | 'Not provided';
   startDate: string;
   endDate: string;
   current: boolean;
@@ -62,13 +67,13 @@ export interface CareerPreferences {
   preferredCountries: string[];
   remotePreference: 'remote_only' | 'hybrid_flexible' | 'onsite_allowed' | 'any';
   workAuthorization: {
-    status: 'Citizen' | 'Permanent Resident' | 'Work Visa' | 'Requires Sponsorship';
+    status: 'Not provided' | 'Citizen' | 'Permanent Resident' | 'Work Visa' | 'Requires Sponsorship';
     details: string;
     eligibleCountries: string[];
   };
 }
 
-export interface Profile {
+export interface Profile extends RecordOrigin {
   personal: PersonalDetails;
   education: Education[];
   experience: WorkExperience[];
@@ -77,6 +82,9 @@ export interface Profile {
   certifications: Certification[];
   languages: string[];
   preferences: CareerPreferences;
+  revision?: string;
+  reviewedAt?: string;
+  legacyProfileAvailable?: boolean;
   rawResumeText?: string;
   updatedAt: string;
 }
@@ -112,7 +120,7 @@ export type ApplicationStatus =
 
 export type ApplicationMode = 'automatic' | 'approval_required' | 'hybrid';
 
-export interface Job {
+export interface Job extends RecordOrigin {
   id: string;
   company: string;
   position: string;
@@ -132,18 +140,19 @@ export interface Job {
   matchPercentage: number;
   matchingSkills: string[];
   missingSkills: string[];
+  recommendation?: "strong_match" | "moderate_match" | "low_match";
+  processing?: { state: "pending" | "matched" | "resume_ready" | "complete" | "failed" | "paused"; error?: string; profileVersion?: string; model?: string; resumeId?: string; coverLetterId?: string };
   matchAnalysis?: string;
   matchStrengths?: string[];
   matchGaps?: string[];
   applicationStatus: ApplicationStatus;
-  isDemo?: boolean;
 }
 
-export interface ConnectorInfo {
+export interface ConnectorInfo extends RecordOrigin {
   id: string;
   sourceName: JobSource;
   category: 'Aggregator' | 'Niche Community' | 'ATS Platform' | 'Direct Company';
-  connectionStatus: 'Connected' | 'API Authorized' | 'Not Connected' | 'Unsupported';
+  connectionStatus: 'Connected' | 'API Authorized' | 'Not Connected' | 'Unsupported' | 'Not implemented';
   discoverySupport: boolean;
   applicationSupport: boolean;
   lastSuccessfulCheck: string | null;
@@ -154,7 +163,7 @@ export interface ConnectorInfo {
   activeJobsFound: number;
 }
 
-export interface TailoredResume {
+export interface TailoredResume extends RecordOrigin {
   id: string;
   jobId: string;
   company: string;
@@ -170,7 +179,7 @@ export interface TailoredResume {
   tailoringNotes: string;
 }
 
-export interface TailoredCoverLetter {
+export interface TailoredCoverLetter extends RecordOrigin {
   id: string;
   jobId: string;
   company: string;
@@ -181,7 +190,7 @@ export interface TailoredCoverLetter {
   tone: 'professional' | 'assertive' | 'conversational';
 }
 
-export interface ApplicationRecord {
+export interface ApplicationRecord extends RecordOrigin {
   id: string;
   jobId: string;
   company: string;
@@ -199,6 +208,8 @@ export interface ApplicationRecord {
     suggestedAnswer: string;
     confirmed: boolean;
   }[];
+  stagedAt?: string;
+  submissionOrigin?: "user_reported" | "legacy_unverified";
   reviewNotes?: string;
   discoveredAt: string;
   appliedAt?: string;
@@ -210,7 +221,7 @@ export interface ApplicationRecord {
   }[];
 }
 
-export interface InterviewRecord {
+export interface InterviewRecord extends RecordOrigin {
   id: string;
   applicationId?: string;
   company: string;
@@ -226,7 +237,7 @@ export interface InterviewRecord {
   talkingPoints: string[];
 }
 
-export interface AgentLog {
+export interface AgentLog extends RecordOrigin {
   id: string;
   timestamp: string;
   category: 'discovery' | 'matching' | 'tailoring' | 'application' | 'system' | 'error';

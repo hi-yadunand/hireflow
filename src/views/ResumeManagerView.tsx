@@ -12,7 +12,7 @@ import {
   Plus,
 } from "lucide-react";
 import type { Profile, TailoredResume, Job } from "../types/index.js";
-import { api } from "../lib/api.js";
+import { api, createActionContext, isCurrentContext, assertActionContext } from "../lib/api.js";
 
 interface ResumeManagerViewProps {
   profile: Profile | null;
@@ -37,22 +37,26 @@ export const ResumeManagerView: React.FC<ResumeManagerViewProps> = ({
   const selectedTailored = resumes.find((r) => r.id === selectedResumeId);
 
   const handleGenerateTailored = async () => {
+    const context = createActionContext();
     if (!selectedJobIdToTailor) return;
     setIsGenerating(true);
     try {
-      await api.tailorResumeForJob(selectedJobIdToTailor);
+      await api.tailorResumeForJob(selectedJobIdToTailor, context);
+      assertActionContext(context);
       onRefreshResumes();
     } catch (err: any) {
-      alert("Failed to tailor resume: " + err.message);
+      if (isCurrentContext(context)) alert("Failed to tailor resume: " + err.message);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const handleCopyText = (content: string) => {
-    navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopyText = async (content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) { alert(error instanceof Error ? error.message : "Could not copy text"); }
   };
 
   const handlePrintDownload = () => {
@@ -68,7 +72,7 @@ export const ResumeManagerView: React.FC<ResumeManagerViewProps> = ({
             Resume & CV Manager
           </h2>
           <p className="text-xs text-[#737373]">
-            Maintain your master verified credentials and inspect ATS-optimized tailored versions for specific target jobs.
+            Review your master profile and AI draft versions for saved jobs. Check all generated claims.
           </p>
         </div>
 
@@ -120,11 +124,11 @@ export const ResumeManagerView: React.FC<ResumeManagerViewProps> = ({
                 <span>Master Professional Resume</span>
               </span>
               <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-black text-white">
-                VERIFIED
+                REVIEW REQUIRED
               </span>
             </div>
             <p className="text-[11px] text-[#737373] mt-1.5">
-              Source-of-truth baseline containing all {profile?.experience.length || 0} positions & {profile?.skills.length || 0} skills.
+              Profile containing all {profile?.experience.length || 0} positions & {profile?.skills.length || 0} skills.
             </p>
             <div className="mt-2 pt-2 border-t border-[#E8E8E8] flex justify-between items-center text-[10px] text-[#737373] font-mono">
               <span>Updated: {profile ? new Date(profile.updatedAt).toLocaleDateString() : "Recent"}</span>
@@ -200,7 +204,7 @@ export const ResumeManagerView: React.FC<ResumeManagerViewProps> = ({
                 title="Print or export as PDF"
               >
                 <Download className="w-3.5 h-3.5 text-[#737373]" />
-                <span>Export PDF</span>
+                <span>Print / Browser PDF</span>
               </button>
             </div>
           </div>

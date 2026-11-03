@@ -12,7 +12,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import type { Job, AppSettings } from "../types/index.js";
-import { api } from "../lib/api.js";
+import { api, createActionContext, isCurrentContext, assertActionContext } from "../lib/api.js";
 
 interface AiMatchesViewProps {
   jobs: Job[];
@@ -31,7 +31,7 @@ export const AiMatchesView: React.FC<AiMatchesViewProps> = ({
   onOpenCoverLetter,
   onRefreshJobs,
 }) => {
-  const threshold = settings?.matchThreshold || 75;
+  const threshold = settings?.matchThreshold ?? 75;
   const matchedJobs = jobs
     .filter((j) => (j.matchPercentage || 0) >= threshold)
     .sort((a, b) => (b.matchPercentage || 0) - (a.matchPercentage || 0));
@@ -39,6 +39,7 @@ export const AiMatchesView: React.FC<AiMatchesViewProps> = ({
   const [loadingActionId, setLoadingActionId] = useState<string | null>(null);
 
   const handleStageApplication = async (job: Job) => {
+    const context = createActionContext();
     setLoadingActionId(job.id);
     try {
       await api.createApplication({
@@ -51,15 +52,12 @@ export const AiMatchesView: React.FC<AiMatchesViewProps> = ({
         status: settings?.applicationMode === "automatic" ? "Ready to Apply" : "Awaiting Approval",
         applicationMode: settings?.applicationMode || "hybrid",
         matchPercentage: job.matchPercentage,
-      });
-
-      await api.updateJob(job.id, {
-        applicationStatus: settings?.applicationMode === "automatic" ? "Ready to Apply" : "Awaiting Approval",
-      });
+      }, context);
+      assertActionContext(context);
 
       onRefreshJobs();
     } catch (err: any) {
-      alert("Failed to stage application: " + err.message);
+      if (isCurrentContext(context)) alert("Failed to stage application: " + err.message);
     } finally {
       setLoadingActionId(null);
     }
@@ -72,10 +70,10 @@ export const AiMatchesView: React.FC<AiMatchesViewProps> = ({
         <div>
           <h2 className="text-base font-semibold text-[#171717] tracking-tight flex items-center space-x-2">
             <Sparkles className="w-4 h-4 text-emerald-600" />
-            <span>AI Semantic Matches</span>
+            <span>Job Matches</span>
           </h2>
           <p className="text-xs text-[#737373]">
-            Roles meeting or exceeding your {threshold}% compatibility threshold based on verified technical alignment.
+            Roles meeting or exceeding your {threshold}% compatibility threshold based on saved scores. Legacy scores are unverified.
           </p>
         </div>
 
@@ -87,7 +85,7 @@ export const AiMatchesView: React.FC<AiMatchesViewProps> = ({
       {matchedJobs.length === 0 ? (
         <div className="p-12 text-center border border-[#E8E8E8] rounded-xl bg-white text-xs text-[#737373] space-y-2">
           <p className="font-semibold text-[#171717]">No jobs meet the current threshold of {threshold}%.</p>
-          <p>You can lower the match threshold in Settings or run a new Discovery Cycle.</p>
+          <p>You can lower the match threshold in Settings or evaluate a manually saved job.</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -153,7 +151,7 @@ export const AiMatchesView: React.FC<AiMatchesViewProps> = ({
                 <div className="space-y-1.5">
                   <span className="text-[11px] font-medium text-emerald-800 flex items-center space-x-1">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Verified Matching Skills ({job.matchingSkills?.length || 0})</span>
+                    <span>Profile Matching Skills ({job.matchingSkills?.length || 0})</span>
                   </span>
                   <div className="flex flex-wrap gap-1">
                     {job.matchingSkills?.map((sk) => (

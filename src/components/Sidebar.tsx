@@ -87,7 +87,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 HireFlow
               </span>
               <span className="text-[10px] text-[#737373] tracking-normal font-mono mt-0.5">
-                AGENT v1.4
+                PHASE 0
               </span>
             </div>
           </div>
@@ -162,7 +162,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {!collapsed && (
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-[#171717] truncate">Master Profile</p>
-              <p className="text-[10px] text-[#737373] truncate font-mono">Verified • 100%</p>
+              <p className="text-[10px] text-[#737373] truncate font-mono">Review before processing</p>
             </div>
           )}
         </button>

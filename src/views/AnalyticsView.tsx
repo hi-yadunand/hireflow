@@ -27,7 +27,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   const midMatches = jobs.filter((j) => (j.matchPercentage || 0) >= 70 && (j.matchPercentage || 0) < 85).length;
   const lowMatches = jobs.filter((j) => (j.matchPercentage || 0) < 70).length;
 
-  const appliedCount = applications.filter((a) => a.status === "Applied" || a.status === "Interview").length;
+  const appliedCount = applications.filter((a) => ["Applied", "Submission Unverified", "Interview"].includes(a.status)).length;
   const interviewCount = interviews.length;
   const conversionRate = appliedCount > 0 ? Math.round((interviewCount / appliedCount) * 100) : 0;
 
@@ -43,10 +43,10 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       <div>
         <h2 className="text-base font-semibold text-[#171717] tracking-tight flex items-center space-x-2">
           <BarChart3 className="w-4 h-4 text-[#171717]" />
-          <span>Autonomous Performance Analytics</span>
+          <span>Recorded Activity Analytics</span>
         </h2>
         <p className="text-xs text-[#737373]">
-          Conversion rates, source effectiveness, and skill gap telemetry.
+          Recorded application outcomes, stored job sources, and match scores.
         </p>
       </div>
 
@@ -55,7 +55,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         <div className="p-4 rounded-xl border border-[#E8E8E8] bg-white">
           <span className="text-[11px] text-[#737373] font-medium">Interview Conversion Rate</span>
           <div className="text-2xl font-bold font-mono text-[#171717] mt-1">{conversionRate}%</div>
-          <span className="text-[10px] text-emerald-700 font-mono">Industry avg: 2-3%</span>
+          <span className="text-[10px] text-emerald-700 font-mono">Unverified records; rounds may repeat</span>
         </div>
 
         <div className="p-4 rounded-xl border border-[#E8E8E8] bg-white">
@@ -69,13 +69,13 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           <div className="text-2xl font-bold font-mono text-[#171717] mt-1">
             {total > 0 ? Math.round(jobs.reduce((acc, j) => acc + (j.matchPercentage || 0), 0) / total) : 0}%
           </div>
-          <span className="text-[10px] text-[#737373] font-mono">Across all indexed jobs</span>
+          <span className="text-[10px] text-[#737373] font-mono">Across stored jobs</span>
         </div>
 
         <div className="p-4 rounded-xl border border-[#E8E8E8] bg-white">
           <span className="text-[11px] text-[#737373] font-medium">Time Saved (Est.)</span>
-          <div className="text-2xl font-bold font-mono text-[#171717] mt-1">38.5 hrs</div>
-          <span className="text-[10px] text-[#737373] font-mono">Resume tailoring & research</span>
+          <div className="text-2xl font-bold font-mono text-[#171717] mt-1">Not measured</div>
+          <span className="text-[10px] text-[#737373] font-mono">No time tracking implemented</span>
         </div>
       </div>
 
@@ -132,7 +132,7 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
         {/* Source Yield Breakdown */}
         <div className="p-5 border border-[#E8E8E8] rounded-xl bg-white space-y-4">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-[#171717]">
-            Source Discovery Yield
+            Stored Jobs by Source
           </h3>
 
           <div className="space-y-2.5 text-xs">
@@ -140,9 +140,9 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
               <div key={src} className="flex items-center justify-between p-2 rounded bg-[#FAF9F8] border border-[#E8E8E8]">
                 <span className="font-medium text-[#171717]">{src}</span>
                 <div className="flex items-center space-x-2">
-                  <span className="font-mono text-[11px] text-[#737373]">{count} discoveries</span>
+                  <span className="font-mono text-[11px] text-[#737373]">{count} stored {count === 1 ? "job" : "jobs"}</span>
                   <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-white border border-[#E8E8E8] text-emerald-800">
-                    Active
+                    Recorded
                   </span>
                 </div>
               </div>

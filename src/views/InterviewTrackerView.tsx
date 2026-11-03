@@ -12,7 +12,7 @@ import {
   Building2,
 } from "lucide-react";
 import type { InterviewRecord, Job } from "../types/index.js";
-import { api } from "../lib/api.js";
+import { api, createActionContext, isCurrentContext, assertActionContext } from "../lib/api.js";
 
 interface InterviewTrackerViewProps {
   interviews: InterviewRecord[];
@@ -33,7 +33,7 @@ export const InterviewTrackerView: React.FC<InterviewTrackerViewProps> = ({
     company: "",
     position: "",
     date: new Date().toISOString().split("T")[0],
-    time: "10:00 AM PST",
+    time: "",
     round: "Technical Round 1" as const,
     format: "Video Call" as const,
     interviewer: "",
@@ -44,37 +44,32 @@ export const InterviewTrackerView: React.FC<InterviewTrackerViewProps> = ({
 
   const handleAddInterview = async (e: React.FormEvent) => {
     e.preventDefault();
+    const context = createActionContext();
     try {
       const created = await api.createInterview({
         ...formData,
         status: "Scheduled",
-      });
+      }, context);
+      assertActionContext(context);
       setShowAddModal(false);
       setSelectedInterviewId(created.id);
       onRefreshInterviews();
     } catch (err: any) {
-      alert("Failed to schedule interview: " + err.message);
+      if (isCurrentContext(context)) alert("Failed to schedule interview: " + err.message);
     }
   };
 
   const handleGeneratePrep = async () => {
+    const context = createActionContext();
     if (!selectedInterview) return;
     setIsGeneratingPrep(true);
     try {
-      const prep = await api.generateInterviewPrep({
-        company: selectedInterview.company,
-        position: selectedInterview.position,
-        round: selectedInterview.round,
-      });
-
-      await api.updateInterview(selectedInterview.id, {
-        aiPrepQuestions: prep.questions,
-        talkingPoints: prep.talkingPoints,
-      });
+      await api.generateAndSaveInterviewPrep(selectedInterview.id, context);
+      assertActionContext(context);
 
       onRefreshInterviews();
     } catch (err: any) {
-      alert("Failed to generate prep: " + err.message);
+      if (isCurrentContext(context)) alert("Failed to generate prep: " + err.message);
     } finally {
       setIsGeneratingPrep(false);
     }
@@ -130,7 +125,7 @@ export const InterviewTrackerView: React.FC<InterviewTrackerViewProps> = ({
                   >
                     <div className="flex items-start justify-between">
                       <div>
-                        <h4 className="text-xs font-semibold text-[#171717]">{item.company}</h4>
+                        <h4 className="text-xs font-semibold text-[#171717]">{item.company} <span className="text-[10px] font-mono text-[#737373]">{item.isDemo ? "DEMO" : "USER-RECORDED"}</span></h4>
                         <p className="text-[11px] text-[#737373]">{item.position}</p>
                       </div>
                       <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200">
@@ -172,7 +167,7 @@ export const InterviewTrackerView: React.FC<InterviewTrackerViewProps> = ({
                   <div className="flex items-center space-x-3 text-xs text-[#737373]">
                     <span>Format: {selectedInterview.format}</span>
                     <span>•</span>
-                    <span>Interviewer: {selectedInterview.interviewer || "Engineering Team"}</span>
+                    <span>Interviewer: {selectedInterview.interviewer || "Not recorded"}</span>
                     <span>•</span>
                     <span className="font-mono text-emerald-700 font-medium">
                       Status: {selectedInterview.status}
@@ -255,7 +250,7 @@ export const InterviewTrackerView: React.FC<InterviewTrackerViewProps> = ({
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
           <div className="bg-white border border-[#E8E8E8] rounded-xl w-full max-w-lg p-6 space-y-4 shadow-xl">
-            <h3 className="text-sm font-semibold text-[#171717]">Schedule New Interview</h3>
+            <h3 className="text-sm font-semibold text-[#171717]">Record Interview Details</h3>
             <form onSubmit={handleAddInterview} className="space-y-3 text-xs">
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -370,7 +365,7 @@ export const InterviewTrackerView: React.FC<InterviewTrackerViewProps> = ({
                   type="submit"
                   className="px-4 py-1.5 bg-[#171717] text-white rounded-md hover:bg-black font-medium"
                 >
-                  Schedule Round
+                  Save Interview Record
                 </button>
               </div>
             </form>
