@@ -1,0 +1,6 @@
+{
+  "name": "HireFlow",
+  "description": "Your next opportunity. On autopilot. AI career agent for autonomous job discovery, matching, tailored documents, and application monitoring.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
