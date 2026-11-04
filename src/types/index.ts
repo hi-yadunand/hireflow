@@ -13,6 +13,7 @@ export interface PersonalDetails {
   portfolioUrl?: string;
   githubUrl?: string;
   linkedinUrl?: string;
+  otherLinks?: string[];
 }
 
 export interface Education {
@@ -65,6 +66,9 @@ export interface CareerPreferences {
     period: 'annual' | 'monthly';
   };
   preferredCountries: string[];
+  preferredLocations?: string[];
+  experienceLevel?: string;
+  noticePeriod?: string;
   remotePreference: 'remote_only' | 'hybrid_flexible' | 'onsite_allowed' | 'any';
   workAuthorization: {
     status: 'Not provided' | 'Citizen' | 'Permanent Resident' | 'Work Visa' | 'Requires Sponsorship';
@@ -86,7 +90,24 @@ export interface Profile extends RecordOrigin {
   reviewedAt?: string;
   legacyProfileAvailable?: boolean;
   rawResumeText?: string;
+  professionalHighlights?: string[];
   updatedAt: string;
+}
+
+// Imported facts remain an unreviewed draft; unknown preference fields are omitted.
+export type ResumeProfileImport = Omit<Partial<Profile>, "preferences"> & {
+  preferences?: Omit<Partial<CareerPreferences>, "expectedSalary" | "workAuthorization"> & {
+    expectedSalary?: Partial<CareerPreferences["expectedSalary"]>;
+    workAuthorization?: Partial<CareerPreferences["workAuthorization"]>;
+  };
+  importWarnings?: string[];
+};
+export interface GeminiStatus {
+  configured: boolean;
+  model: string;
+  connectivity: "not_checked" | "verified" | "failed";
+  checkedAt?: string;
+  error?: string;
 }
 
 export type JobSource =

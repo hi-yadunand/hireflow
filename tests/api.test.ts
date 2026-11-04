@@ -207,3 +207,40 @@ it("persists the requested status and notes on supported approval updates", asyn
   expect(approved.status).toBe(200); expect(approved.body.status).toBe("Ready to Apply"); expect(approved.body.reviewNotes).toBe("Actual approval notes");
   const notes = await request(`/api/applications/${app.id}`, "PUT", { reviewNotes: "Updated notes" }); expect(notes.status).toBe(200); expect(notes.body.reviewNotes).toBe("Updated notes");
 });
+
+it("reports Gemini key presence without returning credentials or claiming connectivity", async () => {
+ vi.stubEnv("GEMINI_API_KEY", "status-only-test-secret");
+ try { const result = await request("/api/ai/status"); expect(result.status).toBe(200); expect(result.body).toMatchObject({ configured: true, connectivity: "not_checked", model: "gemini-3.8-flash" }); expect(JSON.stringify(result.body)).not.toContain("status-only-test-secret"); }
+ finally { vi.unstubAllEnvs(); }
+});
+it("extracts an uploaded document locally without calling Gemini or saving the profile", async () => {
+ const { resumeFixture } = await import("./document-fixtures.js"); const form = new FormData(); form.append("resume", new Blob([resumeFixture], { type: "text/plain" }), "resume.txt");
+ const before = fixture.db.getProfile(); const result = await fetch(base + "/api/profile/extract-document", { method: "POST", body: form });
+ expect(result.status).toBe(200); expect(await result.json()).toMatchObject({ success: true, text: resumeFixture, filename: "resume.txt", format: "txt" }); expect(ai.parseResumeText).not.toHaveBeenCalled(); expect(fixture.db.getProfile()).toEqual(before); expect(fs.existsSync(fixture.db.file)).toBe(false);
+});
+it("rejects oversized multipart uploads and unsupported formats before parsing", async () => {
+ for (const [name, body, expected] of [["resume.exe", "not a resume", 415], ["resume.txt", "A".repeat(5 * 1024 * 1024 + 1), 413]] as const) {
+  const form = new FormData(); form.append("resume", new Blob([body]), name);
+  const response = await fetch(base + "/api/profile/extract-document", { method: "POST", body: form }); expect(response.status).toBe(expected);
+ }
+ expect(ai.parseResumeText).not.toHaveBeenCalled();
+});
+it("blocks demo document uploads and cancels an extraction when pause occurs asynchronously", async () => {
+ const upload = async (mode = "real") => { const form = new FormData(); form.append("resume", new Blob(["A readable candidate resume with education and work history."], { type: "text/plain" }), "resume.txt"); return fetch(base + "/api/profile/extract-document", { method: "POST", headers: { "X-HireFlow-Mode": mode }, body: form }); };
+ expect((await upload("demo")).status).toBe(403);
+ const subscribe = fixture.db.onPause.bind(fixture.db);
+ vi.spyOn(fixture.db, "onPause").mockImplementation(listener => { const unsubscribe = subscribe(listener); queueMicrotask(() => fixture.db.setPaused(true)); return unsubscribe; });
+ expect((await upload()).status).toBe(409); expect(ai.parseResumeText).not.toHaveBeenCalled();
+});
+it("rejects a resume analysis captured before the master profile changes", async () => {
+ const source = fixture.db.getProfile().revision;
+ ai.parseResumeText.mockImplementationOnce(async () => { fixture.db.updateProfile(realProfile()); return { personal: realProfile().personal, skills: [], experience: [], education: [] }; });
+ const result = await request("/api/profile/upload-resume", "POST", { rawText: "A real resume source" });
+ expect(result.status).toBe(409); expect(result.body.error).toContain("Profile or Gemini model changed"); expect(fixture.db.getProfile().revision).not.toBe(source);
+});
+it("returns a reviewed draft only and requires explicit confirmation for profile persistence", async () => {
+ const { importedResume, masterResumeText } = await import("./resume-fixture.js"); ai.parseResumeText.mockResolvedValueOnce(importedResume());
+ const before = fixture.db.getProfile(); const result = await request("/api/profile/upload-resume", "POST", { rawText: masterResumeText });
+ expect(result.status).toBe(200); expect(result.body.reviewRequired).toBe(true); expect(result.body.parsed.projects[0].title).toBe("Example Project"); expect(fixture.db.getProfile()).toEqual(before);
+ expect((await request("/api/profile", "PUT", { ...before, confirmAccuracy: false, expectedVersion: before.revision })).status).toBe(400); expect(fixture.db.getProfile()).toEqual(before);
+});

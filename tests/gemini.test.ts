@@ -49,3 +49,56 @@ it("configures the SDK HTTP timeout explicitly", async () => {
  sdk.generateContent.mockResolvedValue({ text: JSON.stringify({ letterBody: "Draft", keyHooks: [] }) }); await operations.letter();
  expect(sdk.construct).toHaveBeenCalledWith({ apiKey: "test-key-only", httpOptions: { timeout: 60_000 } });
 });
+
+it("returns full structured resume facts and keeps unavailable salary/authorization absent", async () => {
+ const { importedResume, masterResumeText } = await import("./resume-fixture.js");
+ const incoming = importedResume(); sdk.generateContent.mockResolvedValueOnce({ text: JSON.stringify(incoming) });
+ const result = await parseResumeText(masterResumeText);
+ expect(result.projects?.[0]).toMatchObject({ title: "Example Project", technologies: ["React", "PostgreSQL"], highlights: ["Implemented the interface."] });
+ expect(result.certifications?.[0].credentialUrl).toBe("https://example.test/certificate"); expect(result.personal?.otherLinks).toEqual(["https://peerlist.io/example"]);
+ expect(result.education?.[0].achievements).toEqual(["Research award"]); expect(result.professionalHighlights).toEqual(["Team Lead award"]);
+ expect(result.preferences).toMatchObject({ preferredLocations: ["Example City"], noticePeriod: "30 days" });
+ expect(result.preferences?.expectedSalary).toBeUndefined(); expect(result.preferences?.workAuthorization).toBeUndefined();
+ expect(sdk.generateContent.mock.calls[0][0].config.responseSchema.properties).toHaveProperty("projects");
+ expect(result).not.toHaveProperty("reviewedAt");
+});
+it("rejects an invented extracted skill or employer not present in the source", async () => {
+ const { importedResume, masterResumeText } = await import("./resume-fixture.js");
+ for (const field of ["skill", "employer"]) {
+  const value = importedResume(); if (field === "skill") value.skills!.push("InventedSkill"); else value.experience![0].company = "Invented Employer";
+  sdk.generateContent.mockResolvedValueOnce({ text: JSON.stringify(value) });
+  await expect(parseResumeText(masterResumeText)).rejects.toMatchObject({ status: 502, details: { code: "AI_UNGROUNDED" } });
+ }
+});
+it("reports configured versus verified status without exposing the key, and verifies only real responses", async () => {
+ const { getGeminiStatus, checkConnection } = await import("../server/gemini.js");
+ vi.stubEnv("GEMINI_API_KEY", "different-test-key-for-status");
+ expect(getGeminiStatus()).toMatchObject({ configured: true, connectivity: "not_checked" });
+ sdk.generateContent.mockResolvedValueOnce({ text: '{"ok":true}' });
+ expect(await checkConnection()).toMatchObject({ connectivity: "verified", model: "gemini-3.8-flash" });
+ expect(getGeminiStatus().connectivity).toBe("verified"); expect(JSON.stringify(getGeminiStatus())).not.toContain("different-test-key-for-status");
+ vi.stubEnv("GEMINI_API_KEY", ""); expect(getGeminiStatus()).toMatchObject({ configured: false, connectivity: "not_checked" });
+});
+it("keeps malformed connection checks and provider failures unverified", async () => {
+ const { checkConnection, getGeminiStatus } = await import("../server/gemini.js");
+ vi.stubEnv("GEMINI_API_KEY", "connection-failure-test-key");
+ sdk.generateContent.mockResolvedValueOnce({ text: '{"ok":false}' }); await expect(checkConnection()).rejects.toMatchObject({ status: 502 });
+ expect(getGeminiStatus().connectivity).toBe("failed");
+ sdk.generateContent.mockRejectedValueOnce({ status: 400, message: '{"error":{"details":[{"reason":"API_KEY_INVALID"}],"message":"private-test-secret"}}' });
+ await expect(checkConnection()).rejects.toMatchObject({ status: 503, details: { code: "API_KEY_INVALID" } });
+ expect(getGeminiStatus().error).not.toContain("private-test-secret");
+});
+
+it("does not silently accept a semantically empty extraction or a skill matching only part of a word", async () => {
+ sdk.generateContent.mockResolvedValueOnce({ text: JSON.stringify({ personal: {}, skills: [], experience: [], education: [] }) });
+ await expect(parseResumeText("Candidate has substantial readable resume information.")).rejects.toThrow("did not extract any usable");
+ sdk.generateContent.mockResolvedValueOnce({ text: JSON.stringify({ personal: {}, skills: ["R"], experience: [], education: [] }) });
+ await expect(parseResumeText("Research with TypeScript.")).rejects.toMatchObject({ details: { code: "AI_UNGROUNDED" } });
+});
+it("rejects inferred work authorization and workplace preferences", async () => {
+ const { importedResume, masterResumeText } = await import("./resume-fixture.js");
+ const value = importedResume(); value.preferences!.workAuthorization = { status: "Citizen", details: "Example City" };
+ sdk.generateContent.mockResolvedValueOnce({ text: JSON.stringify(value) }); await expect(parseResumeText(masterResumeText)).rejects.toThrow("Authorization classification");
+ const inferred = importedResume(); inferred.preferences!.remotePreference = "onsite_allowed";
+ sdk.generateContent.mockResolvedValueOnce({ text: JSON.stringify(inferred) }); await expect(parseResumeText(masterResumeText)).rejects.toThrow("not explicitly stated");
+});

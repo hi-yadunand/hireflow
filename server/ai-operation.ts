@@ -15,8 +15,12 @@ export function providerError(error: unknown): SafetyError {
   const status = typeof value.status === "number" && Number.isInteger(value.status) && value.status >= 400 && value.status <= 599 ? value.status : undefined;
   const knownCodes = new Set(["RESOURCE_EXHAUSTED", "UNAUTHENTICATED", "PERMISSION_DENIED", "UNAVAILABLE", "DEADLINE_EXCEEDED", "INVALID_ARGUMENT", "INTERNAL", "ETIMEDOUT", "ECONNRESET", "ENOTFOUND"]);
   const code = typeof value.code === "string" && knownCodes.has(value.code) ? value.code : undefined;
-  const category = status === 401 || status === 403 ? "authentication" : status === 429 ? "quota" : "availability";
-  return new SafetyError(`AI request failed (${category}${status ? `; provider HTTP ${status}` : ""}${code ? `; ${code}` : ""}). No result was saved.`, status === 429 ? 429 : 502, { code: code || "AI_PROVIDER_ERROR", providerStatus: status });
+  const raw = typeof value.message === "string" ? value.message : "";
+  const authReason = ["API_KEY_INVALID", "API_KEY_EXPIRED", "API_KEY_SERVICE_BLOCKED", "API_KEY_REJECTED"].find(reason => raw.includes(reason)) || (status === 400 && /api.?key.{0,30}(?:not valid|invalid|expired)/i.test(raw) ? "API_KEY_INVALID" : undefined);
+  const leaked = /key.{0,60}leaked|leaked.{0,60}key/i.test(raw);
+  if (authReason || leaked || status === 401 || status === 403) return new SafetyError(`Gemini authentication failed${leaked ? " (key blocked as leaked)" : ""}. Replace GEMINI_API_KEY in the root .env with a valid, permitted key and restart the server.`, 503, { code: leaked ? "API_KEY_LEAKED" : authReason || code || "AI_AUTHENTICATION", providerStatus: status });
+  const category = status === 429 ? "quota" : "availability";
+  return new SafetyError(`AI request failed (${category}${status ? `; provider HTTP ${status}` : ""}${code ? `; ${code}` : ""}). No result was saved.${status === 429 ? " Check Gemini rate limits and project quota, then retry later." : status === 503 ? " Gemini is temporarily unavailable; retry later." : ""}`, status === 429 ? 429 : 502, { code: code || "AI_PROVIDER_ERROR", providerStatus: status });
 }
 
 /** Bounds the entire operation even when a provider ignores AbortSignal. */

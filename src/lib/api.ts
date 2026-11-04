@@ -9,6 +9,8 @@ import type {
   AgentLog,
   AgentStatus,
   AppSettings,
+  ResumeProfileImport,
+  GeminiStatus,
 } from "../types/index.js";
 
 export interface ActionContext { readonly mode: "real" | "demo"; readonly generation: number; readonly signal: AbortSignal; }
@@ -40,6 +42,26 @@ async function request<T>(url: string, options?: RequestInit, context: ActionCon
 }
 
 export const api = {
+  getGeminiStatus: (context?: ActionContext) => request<GeminiStatus>("/api/ai/status", undefined, context),
+  checkGeminiConnection: (context?: ActionContext) => request<GeminiStatus>("/api/ai/check", { method: "POST", body: "{}" }, context),
+  extractResumeDocument: (file: File, onProgress: (percent: number) => void, context: ActionContext = createActionContext()) => new Promise<{ success: boolean; text: string; filename: string; format: string }>((resolve, reject) => {
+    try { assertActionContext(context); } catch (error) { reject(error); return; }
+    const xhr = new XMLHttpRequest(), cancel = () => xhr.abort();
+    xhr.open("POST", "/api/profile/extract-document"); xhr.setRequestHeader("X-HireFlow-Mode", context.mode); xhr.timeout = 30_000;
+    xhr.upload.onprogress = event => { if (event.lengthComputable && isCurrentContext(context)) onProgress(Math.round(event.loaded / event.total * 100)); };
+    const fail = (message: string) => { context.signal.removeEventListener("abort", cancel); reject(new Error(message)); };
+    xhr.onerror = () => fail("Resume upload failed. Check the local server connection and retry.");
+    xhr.ontimeout = () => fail("Resume upload/extraction timed out. Retry with a smaller document.");
+    xhr.onabort = () => fail("Resume upload cancelled.");
+    xhr.onload = () => {
+      context.signal.removeEventListener("abort", cancel);
+      try { assertActionContext(context); let result; try { result = JSON.parse(xhr.responseText); } catch { throw new Error("Invalid server response to resume upload"); } if (xhr.status < 200 || xhr.status >= 300) throw new Error(result.error || `Resume extraction failed (HTTP ${xhr.status})`); if (result.success !== true || typeof result.text !== "string" || !result.text.trim()) throw new Error("Server returned no readable resume text"); resolve(result); }
+      catch (error) { reject(error); }
+    };
+    context.signal.addEventListener("abort", cancel, { once: true });
+    const body = new FormData(); body.append("resume", file);
+    try { xhr.send(body); } catch { fail("Resume upload could not start. Select the file again and retry."); }
+  }),
   // Profile
   getProfile: (context?: ActionContext) => request<Profile>("/api/profile", undefined, context),
   getLegacyProfile: (context?: ActionContext) => request<{ profile: Profile; warning: string }>("/api/profile/legacy", undefined, context),
@@ -49,7 +71,7 @@ export const api = {
       body: JSON.stringify({ ...profile, confirmAccuracy, expectedVersion: profile.revision }),
     }, context),
   uploadResume: (rawText: string, context?: ActionContext) =>
-    request<{ success: boolean; parsed: Partial<Profile> }>("/api/profile/upload-resume", {
+    request<{ success: boolean; parsed: ResumeProfileImport }>("/api/profile/upload-resume", {
       method: "POST",
       body: JSON.stringify({ rawText }),
     }, context),

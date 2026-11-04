@@ -45,3 +45,8 @@ it("rapid pause/resume cancels a never-settling provider and frees the lock imme
   const first = engine.runCycle(); await vi.waitFor(() => expect(ai.tailorResume).toHaveBeenCalled()); engine.setPaused(true); engine.setPaused(false);
   expect((await first).success).toBe(false); expect(db.getResumes()).toEqual([]); expect((await engine.runCycle()).processedCount).toBe(1);
 });
+it("classifies plain invalid-key errors and service unavailability without exposing provider messages", () => {
+ const invalid = providerError({ status: 400, message: "API key not valid. Please pass a valid API key. secret-must-stay-private" });
+ expect(invalid.status).toBe(503); expect(invalid.details?.code).toBe("API_KEY_INVALID"); expect(invalid.message).toContain("root .env"); expect(invalid.message).not.toContain("secret-must-stay-private");
+ const unavailable = providerError({ status: 503, message: "private provider diagnostics" }); expect(unavailable.message).toContain("temporarily unavailable"); expect(unavailable.message).not.toContain("private provider diagnostics");
+});

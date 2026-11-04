@@ -50,7 +50,7 @@ describe("recovery, idempotency, and quotas", () => {
   });
   it("rejects a concurrent cycle while allowing pause", async () => {
     const { db, ai } = setup(); let resolve!: (v: Awaited<ReturnType<typeof ai.analyzeJobMatch>>) => void;
-    ai.analyzeJobMatch.mockReturnValueOnce(new Promise(r => { resolve = r; })); const engine = new AgentEngine(db, ai); const first = engine.runCycle(); await expect(engine.runCycle()).rejects.toThrow("already"); engine.setPaused(true); resolve({ matchPercentage: 90, matchingSkills: [], missingSkills: [], matchAnalysis: "Test", matchStrengths: [], matchGaps: [], recommendation: "strong_match" }); await first; expect(db.getApplications()).toHaveLength(0);
+    ai.analyzeJobMatch.mockReturnValueOnce(new Promise(r => { resolve = r; })); const engine = new AgentEngine(db, ai); const first = engine.runCycle(); await expect(engine.runCycle()).rejects.toThrow("already"); await engine.setPaused(true); resolve({ matchPercentage: 90, matchingSkills: [], missingSkills: [], matchAnalysis: "Test", matchStrengths: [], matchGaps: [], recommendation: "strong_match" }); await first; expect(db.getApplications()).toHaveLength(0);
   });
   it("rejects stale AI output when the profile changes in flight", async () => {
     const { db, ai } = setup(); ai.tailorResume.mockImplementationOnce(async (_p, j) => { const p = realProfile(); p.personal.fullName = "Changed"; db.updateProfile(p); return { id: "stale", jobId: j.id, company: j.company, position: j.position, createdAt: "", tailoredSummary: "Old", tailoredSkills: [], tailoredExperience: [], tailoringNotes: "" }; });

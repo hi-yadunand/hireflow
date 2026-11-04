@@ -9,7 +9,7 @@ import { api, setDataMode, createActionContext } from "../src/lib/api.js";
 import { initialSettings } from "../server/db.js";
 import { realProfile, job, deferred } from "./fixtures.js";
 import type { ApplicationRecord } from "../src/types/index.js";
-beforeEach(() => { setDataMode("real"); vi.spyOn(window, "alert").mockImplementation(() => {}); });
+beforeEach(() => { vi.spyOn(api, "getGeminiStatus").mockResolvedValue({ configured: false, model: "gemini-3.8-flash", connectivity: "not_checked" }); vi.spyOn(api, "extractResumeDocument").mockRejectedValue(new Error("Document extraction mock not configured")); setDataMode("real"); vi.spyOn(window, "alert").mockImplementation(() => {}); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const profileProps = () => ({ isOpen: true, onClose: vi.fn(), profile: realProfile(), onProfileUpdated: vi.fn() });
 function application(id = "app-one", answer = "Original"): ApplicationRecord {
@@ -31,16 +31,21 @@ it("replaces imported skills rather than contaminating extraction with previous 
  vi.spyOn(api, "uploadResume").mockResolvedValue({ success: true, parsed: { personal: { ...realProfile().personal, fullName: "Botanist" }, skills: ["Botany"], experience: [], education: [], languages: [] } });
  const update = vi.spyOn(api, "updateProfile").mockResolvedValue(realProfile()); render(<ProfileModal {...profileProps()} />);
  fireEvent.click(screen.getByRole("button", { name: /Resume Import/ })); fireEvent.change(screen.getByPlaceholderText(/Paste resume text/), { target: { value: "Botanist\nBotany" } }); fireEvent.click(screen.getByRole("button", { name: "Extract Profile Data" }));
- fireEvent.click(await screen.findByRole("button", { name: "Replace Imported Sections" })); fireEvent.click(screen.getByRole("checkbox", { name: /reviewed all fields/ })); fireEvent.click(screen.getByRole("button", { name: "Save Master Profile" })); await waitFor(() => expect(update).toHaveBeenCalled());
+ fireEvent.click(await screen.findByRole("button", { name: "Use All Extracted Values" })); fireEvent.click(screen.getByRole("checkbox", { name: /reviewed all fields/ })); fireEvent.click(screen.getByRole("button", { name: "Save Master Profile" })); await waitFor(() => expect(update).toHaveBeenCalled());
  expect(update.mock.calls[0][0].skills).toEqual(["Botany"]); expect(update.mock.calls[0][0].experience).toEqual([]);
 });
 it("shows AI parsing errors without offering fabricated extraction", async () => {
- vi.spyOn(api, "uploadResume").mockRejectedValue(new Error("Gemini unavailable")); render(<ProfileModal {...profileProps()} />); fireEvent.click(screen.getByRole("button", { name: /Resume Import/ })); fireEvent.change(screen.getByPlaceholderText(/Paste resume text/), { target: { value: "Resume" } }); fireEvent.click(screen.getByRole("button", { name: "Extract Profile Data" })); expect(await screen.findByText("Gemini unavailable")).toBeTruthy(); expect(screen.queryByRole("button", { name: "Replace Imported Sections" })).toBeNull();
+ vi.spyOn(api, "uploadResume").mockRejectedValue(new Error("Gemini unavailable")); render(<ProfileModal {...profileProps()} />); fireEvent.click(screen.getByRole("button", { name: /Resume Import/ })); fireEvent.change(screen.getByPlaceholderText(/Paste resume text/), { target: { value: "Resume" } }); fireEvent.click(screen.getByRole("button", { name: "Extract Profile Data" })); expect(await screen.findByText("Gemini unavailable")).toBeTruthy(); expect(screen.queryByRole("button", { name: "Use All Extracted Values" })).toBeNull();
 });
-it("rejects binary resume files rather than reading them as text", () => {
- const { container } = render(<ProfileModal {...profileProps()} />); fireEvent.click(screen.getByRole("button", { name: /Resume Import/ })); const input = container.querySelector('input[type="file"]')!;
- fireEvent.change(input, { target: { files: [new File(["binary"], "resume.pdf", { type: "application/pdf" })] } }); expect(screen.getByText(/PDF and Word extraction is not implemented/)).toBeTruthy();
+it("routes PDF files through document extraction and shows corrupted-document errors without reading binary as text", async () => {
+ const extract = vi.spyOn(api, "extractResumeDocument").mockRejectedValueOnce(new Error("Could not extract this corrupted document"));
+ const textReader = vi.spyOn(FileReader.prototype, "readAsText");
+ const { container } = render(<ProfileModal {...profileProps()} />); fireEvent.click(screen.getByRole("button", { name: /Resume Import/ }));
+ const file = new File(["binary"], "resume.pdf", { type: "application/pdf" });
+ fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+ expect(await screen.findByText("Could not extract this corrupted document")).toBeTruthy(); expect(extract.mock.calls[0][0]).toBe(file); expect(textReader).not.toHaveBeenCalled();
 });
+
 it("adds an empty editable certification instead of an invented AWS qualification", () => {
  render(<ProfileModal {...profileProps()} />); fireEvent.click(screen.getByRole("button", { name: /Skills & Certs/ })); fireEvent.click(screen.getByRole("button", { name: /Add Certification/ })); expect((screen.getByLabelText("Certification name") as HTMLInputElement).value).toBe(""); expect(screen.queryByText("AWS Certified Developer")).toBeNull();
 });
@@ -70,8 +75,8 @@ it("opens settings after null loading state without changing hook order", () => 
 it("keeps existing projects and certifications when accepting extracted resume sections", async () => {
  const profile = realProfile(); profile.projects = [{ id: "project", title: "Real project", description: "User work", technologies: [] }]; profile.certifications = [{ id: "cert", name: "Real credential", issuer: "Issuer", issueDate: "2026" }];
  vi.spyOn(api, "uploadResume").mockResolvedValue({ success: true, parsed: { personal: realProfile().personal, skills: [], experience: [], education: [], languages: [] } }); const update = vi.spyOn(api, "updateProfile").mockResolvedValue(profile);
- render(<ProfileModal {...profileProps()} profile={profile} />); fireEvent.click(screen.getByRole("button", { name: /Resume Import/ })); fireEvent.change(screen.getByPlaceholderText(/Paste resume text/), { target: { value: "User resume" } }); fireEvent.click(screen.getByRole("button", { name: "Extract Profile Data" })); fireEvent.click(await screen.findByRole("button", { name: "Replace Imported Sections" })); fireEvent.click(screen.getByRole("checkbox", { name: /reviewed all fields/ })); fireEvent.click(screen.getByRole("button", { name: "Save Master Profile" }));
- await waitFor(() => expect(update).toHaveBeenCalled()); expect(update.mock.calls[0][0].projects).toEqual(profile.projects); expect(update.mock.calls[0][0].certifications).toEqual(profile.certifications);
+ render(<ProfileModal {...profileProps()} profile={profile} />); fireEvent.click(screen.getByRole("button", { name: /Resume Import/ })); fireEvent.change(screen.getByPlaceholderText(/Paste resume text/), { target: { value: "User resume" } }); fireEvent.click(screen.getByRole("button", { name: "Extract Profile Data" })); fireEvent.click(await screen.findByRole("button", { name: "Use All Extracted Values" })); fireEvent.click(screen.getByRole("checkbox", { name: /reviewed all fields/ })); fireEvent.click(screen.getByRole("button", { name: "Save Master Profile" }));
+ await waitFor(() => expect(update).toHaveBeenCalled()); expect(update.mock.calls[0][0].projects).toEqual(profile.projects.map(project => ({ ...project, highlights: [] }))); expect(update.mock.calls[0][0].certifications).toEqual(profile.certifications);
 });
 it("does not promote a preserved sample profile into real profile editing", async () => {
  const profile = { ...realProfile(), legacyProfileAvailable: true }; vi.spyOn(api, "getLegacyProfile").mockResolvedValue({ profile: { ...realProfile(), isDemo: true, personal: { ...realProfile().personal, fullName: "Sample Candidate" } }, warning: "Demo" }); render(<ProfileModal {...profileProps()} profile={profile} />); fireEvent.click(screen.getByRole("button", { name: /Review preserved legacy profile/ }));
@@ -135,12 +140,12 @@ it("rejects a stale resume extraction after real → demo → real", async () =>
  const pending = deferred<Awaited<ReturnType<typeof api.uploadResume>>>(); vi.spyOn(api, "uploadResume").mockReturnValueOnce(pending.promise);
  render(<ProfileModal {...profileProps()} />); fireEvent.click(screen.getByRole("button", { name: /Resume Import/ })); fireEvent.change(screen.getByPlaceholderText(/Paste resume text/), { target: { value: "Source" } }); fireEvent.click(screen.getByRole("button", { name: "Extract Profile Data" }));
  setDataMode("demo"); setDataMode("real"); await act(async () => pending.resolve({ success: true, parsed: { personal: { ...realProfile().personal, fullName: "Stale candidate" } } }));
- expect(screen.queryByRole("button", { name: "Replace Imported Sections" })).toBeNull(); expect(screen.queryByText("Stale candidate")).toBeNull();
+ expect(screen.queryByRole("button", { name: "Use All Extracted Values" })).toBeNull(); expect(screen.queryByText("Stale candidate")).toBeNull();
 });
 it("does not show an extraction preview when the source text changes during parsing", async () => {
  const pending = deferred<Awaited<ReturnType<typeof api.uploadResume>>>(); vi.spyOn(api, "uploadResume").mockReturnValueOnce(pending.promise);
  render(<ProfileModal {...profileProps()} />); fireEvent.click(screen.getByRole("button", { name: /Resume Import/ })); const source = screen.getByPlaceholderText(/Paste resume text/); fireEvent.change(source, { target: { value: "Original source" } }); fireEvent.click(screen.getByRole("button", { name: "Extract Profile Data" })); fireEvent.change(source, { target: { value: "New source" } });
- await act(async () => pending.resolve({ success: true, parsed: { skills: ["TypeScript"] } })); expect(screen.queryByRole("button", { name: "Replace Imported Sections" })).toBeNull(); expect(screen.getByText(/changed during extraction/)).toBeTruthy();
+ await act(async () => pending.resolve({ success: true, parsed: { skills: ["TypeScript"] } })); expect(screen.queryByRole("button", { name: "Use All Extracted Values" })).toBeNull(); expect(screen.getByText(/changed during extraction/)).toBeTruthy();
 });
 it("does not overwrite newer profile edits with a delayed legacy import", async () => {
  const pending = deferred<Awaited<ReturnType<typeof api.getLegacyProfile>>>(); vi.spyOn(api, "getLegacyProfile").mockReturnValueOnce(pending.promise);
@@ -151,4 +156,95 @@ for (const [button, status] of [["Mark Rejected", "Rejected"], ["Moved to Interv
  const create = vi.spyOn(api, "createApplication"), record = vi.spyOn(api, "recordManualApplication").mockResolvedValue(application());
  render(<ApplicationReviewModal isOpen application={{ ...application("app-preview-job-real"), status: "Discovered" }} job={job()} onClose={vi.fn()} onStatusChanged={vi.fn()} />); fireEvent.click(screen.getByRole("button", { name: button }));
  await waitFor(() => expect(record).toHaveBeenCalledWith(expect.objectContaining({ jobId: "job-real", status }), createActionContext())); expect(create).not.toHaveBeenCalled();
+});
+
+it("saves a newly added internship and project without invented highlight rows", async () => {
+ const props = profileProps(), save = vi.spyOn(api, "updateProfile").mockResolvedValue(props.profile);
+ render(<ProfileModal {...props} />);
+ fireEvent.click(screen.getByRole("button", { name: /Work & Internships/ }));
+ fireEvent.click(screen.getByRole("button", { name: "Add Internship" }));
+ fireEvent.change(screen.getByPlaceholderText("Company Name"), { target: { value: "Test employer" } });
+ fireEvent.change(screen.getByPlaceholderText(/Role Title/), { target: { value: "Intern" } });
+ // Explicitly add an editor row and leave it blank, reproducing the save failure.
+ fireEvent.click(screen.getByRole("button", { name: "Add bullet point" }));
+ fireEvent.click(screen.getByRole("button", { name: "Projects" }));
+ fireEvent.click(screen.getByRole("button", { name: "Add Project" }));
+ fireEvent.change(screen.getByPlaceholderText("Project Title"), { target: { value: "Test project" } });
+ fireEvent.click(screen.getByRole("checkbox", { name: /reviewed all fields/ }));
+ fireEvent.click(screen.getByRole("button", { name: "Save Master Profile" }));
+ await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+ expect(save.mock.calls[0][0].experience).toEqual([expect.objectContaining({ company: "Test employer", role: "Intern", type: "Internship", highlights: [] })]);
+ expect(save.mock.calls[0][0].projects).toEqual([expect.objectContaining({ title: "Test project", highlights: [] })]);
+ expect(window.alert).not.toHaveBeenCalled(); expect(props.profile.experience).toEqual([]); expect(props.profile.projects).toEqual([]);
+});
+
+for (const value of [undefined, null] as const) it(`opens a stored profile with ${String(value)} highlights and saves it as an empty array`, async () => {
+ const props = profileProps(); props.profile.experience = [{ id: "internship", company: "Test employer", role: "Intern", type: "Internship", startDate: "", endDate: "", location: "", current: false, description: "", highlights: value as unknown as string[] }];
+ const before = structuredClone(props.profile), save = vi.spyOn(api, "updateProfile").mockResolvedValue(props.profile);
+ render(<ProfileModal {...props} />); fireEvent.click(screen.getByRole("button", { name: /Work & Internships/ }));
+ expect(screen.getByDisplayValue("Test employer")).toBeTruthy();
+ fireEvent.click(screen.getByRole("checkbox", { name: /reviewed all fields/ })); fireEvent.click(screen.getByRole("button", { name: "Save Master Profile" }));
+ await waitFor(() => expect(save).toHaveBeenCalledTimes(1)); expect(save.mock.calls[0][0].experience![0].highlights).toEqual([]); expect(props.profile).toEqual(before);
+});
+
+it("allows clearing the final optional highlight while retaining a genuine project highlight", async () => {
+ const props = profileProps(); props.profile.experience = [{ id: "internship", company: "Test employer", role: "Intern", type: "Internship", startDate: "", endDate: "", location: "", current: false, description: "", highlights: ["Original work highlight"] }];
+ props.profile.projects = [{ id: "project", title: "Test project", description: "", technologies: [], highlights: ["A genuine project highlight"] }];
+ const save = vi.spyOn(api, "updateProfile").mockResolvedValue(props.profile);
+ render(<ProfileModal {...props} />); fireEvent.click(screen.getByRole("button", { name: /Work & Internships/ }));
+ fireEvent.change(screen.getByDisplayValue("Original work highlight"), { target: { value: " " } });
+ fireEvent.click(screen.getByRole("checkbox", { name: /reviewed all fields/ })); fireEvent.click(screen.getByRole("button", { name: "Save Master Profile" }));
+ await waitFor(() => expect(save).toHaveBeenCalledTimes(1)); expect(save.mock.calls[0][0].experience![0].highlights).toEqual([]);
+ expect(save.mock.calls[0][0].projects![0].highlights).toEqual(["A genuine project highlight"]);
+ expect(props.profile.experience[0].highlights).toEqual(["Original work highlight"]);
+});
+
+it("keeps confirmation and entered data after a failed save and blocks duplicate submissions", async () => {
+ const pending = deferred<ReturnType<typeof realProfile>>(), save = vi.spyOn(api, "updateProfile").mockReturnValueOnce(pending.promise).mockResolvedValue(realProfile());
+ render(<ProfileModal {...profileProps()} />); fireEvent.change(screen.getByDisplayValue("Test Candidate"), { target: { value: "Preserved draft" } });
+ const checkbox = screen.getByRole("checkbox", { name: /reviewed all fields/ }) as HTMLInputElement;
+ fireEvent.click(checkbox); fireEvent.click(screen.getByRole("button", { name: "Save Master Profile" }));
+ fireEvent.click(screen.getByRole("button", { name: "Saving..." })); expect(save).toHaveBeenCalledTimes(1);
+ await act(async () => pending.reject(new Error("PostgreSQL operation failed")));
+ expect(screen.getByRole("alert").textContent).toContain("PostgreSQL operation failed"); expect(checkbox.checked).toBe(true); expect(screen.getByDisplayValue("Preserved draft")).toBeTruthy(); expect(screen.queryByText("Profile updated successfully!")).toBeNull();
+ fireEvent.click(screen.getByRole("button", { name: "Save Master Profile" })); await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+});
+it("retains visible save success when the parent receives the new PostgreSQL profile revision", async () => {
+ const saved = { ...realProfile(), revision: "new-postgres-revision" };
+ vi.spyOn(api, "updateProfile").mockResolvedValue(saved);
+ function Parent() { const [profile, setProfile] = React.useState(realProfile()); return <ProfileModal isOpen profile={profile} onProfileUpdated={setProfile} onClose={() => {}} />; }
+ render(<Parent />); fireEvent.click(screen.getByRole("checkbox", { name: /reviewed all fields/ })); fireEvent.click(screen.getByRole("button", { name: "Save Master Profile" }));
+ expect(await screen.findByText("Profile updated successfully!")).toBeTruthy(); expect((screen.getByRole("checkbox", { name: /reviewed all fields/ }) as HTMLInputElement).checked).toBe(true);
+});
+it("populates all profile tabs after Gemini extraction, deduplicates a retry and waits for explicit save", async () => {
+ const { importedResume, masterResumeText } = await import("./resume-fixture.js"), { emptyProfile } = await import("../server/db.js");
+ vi.spyOn(api, "uploadResume").mockImplementation(async () => ({ success: true, parsed: importedResume() }));
+ const save = vi.spyOn(api, "updateProfile").mockResolvedValue(realProfile());
+ render(<ProfileModal {...profileProps()} profile={emptyProfile()} />); fireEvent.click(screen.getByRole("button", { name: /Resume Import/ }));
+ fireEvent.change(screen.getByPlaceholderText(/Paste resume text/), { target: { value: masterResumeText } }); fireEvent.click(screen.getByRole("button", { name: "Extract Profile Data" }));
+ await screen.findByRole("button", { name: "Use All Extracted Values" }); expect(save).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole("button", { name: "Extract Profile Data" })); await waitFor(() => expect((screen.getByRole("button", { name: "Extract Profile Data" }) as HTMLButtonElement).disabled).toBe(false));
+ fireEvent.click(screen.getByRole("button", { name: "Personal & Links" })); expect(screen.getByDisplayValue("candidate@example.test")).toBeTruthy();
+ fireEvent.click(screen.getByRole("button", { name: "Projects" })); expect(screen.getByDisplayValue("Example Project")).toBeTruthy(); expect(screen.getByLabelText("Project contributions and achievements")).toHaveProperty("value", "Implemented the interface.");
+ fireEvent.click(screen.getByRole("button", { name: "Preferences & Visa" })); expect(screen.getByLabelText("Notice period")).toHaveProperty("value", "30 days");
+ fireEvent.click(screen.getByRole("checkbox", { name: /reviewed all fields/ })); fireEvent.click(screen.getByRole("button", { name: "Save Master Profile" }));
+ await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+ expect(save.mock.calls[0][0].experience).toHaveLength(1); expect(save.mock.calls[0][0].certifications).toHaveLength(1); expect(save.mock.calls[0][0].professionalHighlights).toEqual(["Team Lead award"]);
+});
+it("preserves an existing email until the candidate resolves the extracted conflict", async () => {
+ const profile = realProfile(); profile.personal.email = "existing@example.test";
+ vi.spyOn(api, "uploadResume").mockResolvedValue({ success: true, parsed: { personal: { ...profile.personal, email: "new@example.test" }, skills: [], experience: [], education: [] } });
+ const save = vi.spyOn(api, "updateProfile").mockResolvedValue(profile);
+ render(<ProfileModal {...profileProps()} profile={profile} />); fireEvent.click(screen.getByRole("button", { name: /Resume Import/ })); fireEvent.change(screen.getByPlaceholderText(/Paste resume text/), { target: { value: "New candidate email" } }); fireEvent.click(screen.getByRole("button", { name: "Extract Profile Data" }));
+ await screen.findByRole("button", { name: "Use extracted" }); expect((screen.getByRole("button", { name: "Save Master Profile" }) as HTMLButtonElement).disabled).toBe(true); expect(save).not.toHaveBeenCalled();
+ fireEvent.click(screen.getByRole("button", { name: "Use extracted" })); fireEvent.click(screen.getByRole("button", { name: "Personal & Links" })); expect(screen.getByDisplayValue("new@example.test")).toBeTruthy(); expect(profile.personal.email).toBe("existing@example.test");
+});
+it("rejects a late document upload after another file is selected or mode changes", async () => {
+ const pending = deferred<Awaited<ReturnType<typeof api.extractResumeDocument>>>();
+ vi.spyOn(api, "extractResumeDocument").mockReturnValueOnce(pending.promise).mockResolvedValueOnce({ success: true, text: "Latest document text", filename: "new.txt", format: "txt" });
+ const { container } = render(<ProfileModal {...profileProps()} />); fireEvent.click(screen.getByRole("button", { name: /Resume Import/ })); const input = container.querySelector('input[type="file"]')!;
+ fireEvent.change(input, { target: { files: [new File(["old"], "old.txt")] } }); fireEvent.change(input, { target: { files: [new File(["new"], "new.txt")] } });
+ await waitFor(() => expect(screen.getByPlaceholderText(/Paste resume text/)).toHaveProperty("value", "Latest document text"));
+ setDataMode("demo"); setDataMode("real"); await act(async () => pending.resolve({ success: true, text: "Stale text", filename: "old.txt", format: "txt" }));
+ expect(screen.getByPlaceholderText(/Paste resume text/)).toHaveProperty("value", "Latest document text");
 });

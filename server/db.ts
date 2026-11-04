@@ -4,6 +4,7 @@ import { randomUUID, createHash } from "node:crypto";
 import type { Profile, Job, ConnectorInfo, ApplicationRecord, TailoredResume, TailoredCoverLetter, InterviewRecord, AgentLog, AgentStatus, AppSettings } from "../src/types/index.js";
 import { DEFAULT_PROFILE, DEFAULT_CONNECTORS, isKnownDemoRecord, demoLinkedRecords } from "./demo.js";
 import { SafetyError } from "./validation.js";
+import { normalizeProfileHighlights } from "../src/lib/profile.js";
 
 export function emptyProfile(): Profile {
   return {
@@ -47,8 +48,19 @@ export class Database {
   private pauseListeners = new Set<() => void>();
   onPause(listener: () => void) { this.pauseListeners.add(listener); return () => { this.pauseListeners.delete(listener); }; }
   private reservations = new Map<string, { jobId: string; day: string }>();
-  constructor(readonly file = path.resolve("data/hireflow_db.json"), private now: () => Date = () => new Date()) {
-    if (fs.existsSync(file)) {
+  // Explicit in-memory snapshots reuse domain rules without accessing JSON files.
+  static memory(data: DatabaseSchema, reservations: [string, { jobId: string; day: string }][] = [], now: () => Date = () => new Date()) {
+    const db = new Database("", now, data);
+    db.reservations = new Map(structuredClone(reservations));
+    db.runtimeWorkerState = data.status.workerState;
+    return db;
+  }
+  snapshot() { return this.clone(this.data); }
+  stageReservations() { return this.clone([...this.reservations.entries()]); }
+  constructor(readonly file = path.resolve("data/hireflow_db.json"), private now: () => Date = () => new Date(), private memoryData?: DatabaseSchema) {
+    if (memoryData) {
+      this.data = structuredClone(memoryData);
+    } else if (fs.existsSync(file)) {
       const raw = fs.readFileSync(file, "utf8");
       const parsed = JSON.parse(raw);
       for (const key of ["jobs", "connectors", "applications", "resumes", "coverLetters", "interviews", "logs"]) {
@@ -64,6 +76,7 @@ export class Database {
   private commit(change: (draft: DatabaseSchema) => void) {
     const draft = structuredClone(this.data);
     change(draft);
+    if (this.memoryData) { this.data = draft; return; }
     const exists = fs.existsSync(this.file);
     if ((exists ? fingerprint(fs.readFileSync(this.file, "utf8")) : undefined) !== this.diskFingerprint) {
       throw new Error("Database changed outside this process. Reload before writing; existing data was preserved.");
@@ -107,14 +120,14 @@ export class Database {
   private visible<T extends { isDemo?: boolean }>(rows: T[]) { return this.clone(rows.filter(isReal)); }
   getProfile(): Profile {
     if (this.data.profile.isDemo || sameSeedProfile(this.data.profile)) return { ...emptyProfile(), revision: this.profileVersion(), legacyProfileAvailable: true };
-    return this.clone({ ...this.data.profile, revision: this.profileVersion(), legacyProfileAvailable: Boolean(this.data.legacyProfile), legacyUnverified: !this.data.profile.reviewedAt });
+    return normalizeProfileHighlights(this.clone({ ...this.data.profile, revision: this.profileVersion(), legacyProfileAvailable: Boolean(this.data.legacyProfile), legacyUnverified: !this.data.profile.reviewedAt }));
   }
   getLegacyProfile() { const legacy = sameSeedProfile(this.data.profile) ? this.data.profile : this.data.legacyProfile || this.data.profile; return this.clone({ ...legacy, isDemo: legacy.isDemo || sameSeedProfile(legacy) }); }
   updateProfile(profile: Profile, expectedVersion?: string): Profile {
     if (expectedVersion !== undefined && expectedVersion !== this.profileVersion()) throw new SafetyError("Profile changed since it was opened. Reload and review the latest profile before saving.", 409);
     this.commit(d => {
       if (!d.legacyProfile) d.legacyProfile = this.clone(d.profile);
-      d.profile = { ...d.profile, ...this.clone(profile), isDemo: false, legacyUnverified: false, revision: randomUUID(), updatedAt: this.now().toISOString(), reviewedAt: this.now().toISOString() };
+      d.profile = { ...d.profile, ...this.clone(normalizeProfileHighlights(profile)), isDemo: false, legacyUnverified: false, revision: randomUUID(), updatedAt: this.now().toISOString(), reviewedAt: this.now().toISOString() };
     });
     return this.getProfile();
   }
@@ -146,9 +159,11 @@ export class Database {
   }
   getApplication(id: string) { return this.getApplications().find(a => a.id === id); }
   reserveStage(jobId: string) {
+    const realJobIds = new Set(this.getJobs().map(job => job.id));
+    if (!realJobIds.has(jobId)) throw new SafetyError("Real job not found", 404);
     const existing = this.getApplications().find(a => a.jobId === jobId && a.stagedAt);
     if (this.reservationsHas(jobId)) throw new SafetyError("This application is already being prepared", 409);
-    const reserved = [...this.reservations.values()].filter(r => r.day === this.day() && !this.getApplications().some(a => a.jobId === r.jobId && a.stagedAt)).length;
+    const reserved = [...this.reservations.values()].filter(r => realJobIds.has(r.jobId) && r.day === this.day() && !this.getApplications().some(a => a.jobId === r.jobId && a.stagedAt)).length;
     if (!existing && this.realStagedJobIds().length + reserved >= this.getSettings().dailyApplicationLimit) throw new SafetyError("Daily application staging limit reached (UTC)", 429);
     const token = randomUUID(); this.reservations.set(token, { jobId, day: this.day() }); return token;
   }
